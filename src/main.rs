@@ -123,7 +123,7 @@ impl Default for Camera {
 struct App {
     main: Fractal,
     // windows: Vec<FractalWindow>,
-    windows: Vec<Fractal>,
+    fractal_windows: Vec<(Fractal, String)>,
     show_overlay: bool,
     /// whether to have nice trackpad panning and zooming at the cost of disabling the mouse
     trackpad: bool,
@@ -132,7 +132,9 @@ impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         Self {
             main: Fractal::default(cc, FractalType::default()),
-            windows: vec![],
+            // fractal_windows: vec![],
+            fractal_windows: vec![(Fractal::default(cc, FractalType::default()), "test".into())],
+            // settings_windows: vec![],
             show_overlay: true,
             trackpad: false,
         }
@@ -149,45 +151,18 @@ impl eframe::App for App {
                 // let _ = ui.button(format!("dt: {:?}", dt));
                 // let _ = ui.button(format!("1/dt: {:?}", 1.0 / dt));
 
-                // pan and zoom
-                let r = ui.interact(
-                    ui.available_rect_before_wrap(),
-                    eframe::egui::Id::new("main"),
-                    egui::Sense::click_and_drag(),
-                );
-                if self.trackpad {
-                    self.main.pan(ctx.input(|i| i.smooth_scroll_delta));
-                } else if r.is_pointer_button_down_on() {
-                    self.main.pan(r.drag_delta());
-                    self.main.pan_velocity(r.drag_delta() / dt);
-                } else {
-                    self.main.autopan(dt);
-                }
-
-                if let Some(mouse_pos) = ctx.input(|i| i.pointer.latest_pos()) {
-                    self.main.zoom(
-                        mouse_pos - ui.available_rect_before_wrap().center(),
-                        ctx.input(|i| {
-                            if self.trackpad {
-                                i.zoom_delta()
-                            } else {
-                                (i.smooth_scroll_delta.y / 300.0).exp()
-                            }
-                        }),
-                    )
-                }
-
                 if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
                     self.show_overlay = !self.show_overlay;
                 }
 
-                self.main.render_to_ui(ui);
+                self.main.render_to_ui(ctx, ui, "main");
                 if self.show_overlay {
-                    self.windows.retain_mut(|fractal| {
+                    self.fractal_windows.retain_mut(|(fractal, name)| {
                         // TODO: better title name
                         // TODO: make title smaller
+                        // TODO: make it not have a shadow
                         let mut open = true;
-                        egui::Window::new("fractal")
+                        egui::Window::new(&*name)
                             // .open(&mut is_open)
                             // .vscroll(false)
                             .resizable(true)
@@ -195,9 +170,31 @@ impl eframe::App for App {
                             // .default_open(default_open)
                             .default_size([250.0, 250.0])
                             .open(&mut open)
-                            .resizable(true)
                             .show(ctx, |ui| {
-                                fractal.render_to_ui(ui);
+                                // Scene::new()
+                                //     .max_inner_size([350.0, 1000.0])
+                                //     .zoom_range(0.1..=2.0)
+                                //     .show(ui, &mut self.scene_rect, |ui| {
+                                //         reset_view = ui.button("Reset view").clicked();
+
+                                //         ui.add_space(16.0);
+
+                                //         self.widget_gallery.ui(ui);
+
+                                //         ui.put(
+                                //             Rect::from_min_size(
+                                //                 Pos2::new(0.0, -64.0),
+                                //                 Vec2::new(200.0, 16.0),
+                                //             ),
+                                //             egui::Label::new("You can put a widget anywhere")
+                                //                 .selectable(false),
+                                //         );
+
+                                //         inner_rect = ui.min_rect();
+                                //     })
+                                //     .response;
+
+                                fractal.render_to_ui(ctx, ui, name);
                                 ui.allocate_space(ui.available_size());
                             });
                         open

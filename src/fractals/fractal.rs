@@ -1,68 +1,76 @@
 use std::sync::Arc;
 
-use eframe::wgpu::{self, util::DeviceExt};
+use eframe::{
+    egui,
+    wgpu::{self, util::DeviceExt},
+};
 
 use crate::{Camera, Complex};
 
 const CYCLE_DEPTH: u32 = u32::MAX;
 const VELOCITY_DAMPING: f32 = 0.9999;
 
+#[repr(u32)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum FractalType {
-    Mandelbrot { z0: Complex, max_depth: u32 },
-    Julia,
+    Mandelbrot { z0: Complex } = 0,
+    Julia = 1,
 }
 impl Default for FractalType {
     fn default() -> Self {
-        Self::Mandelbrot {
-            z0: Complex::ZERO,
-            max_depth: 1024,
-        }
+        Self::Mandelbrot { z0: Complex::ZERO }
     }
 }
 
-#[derive(Clone, Copy, bytemuck::NoUninit)]
 #[repr(C)]
+#[derive(Clone, Copy, bytemuck::NoUninit)]
 struct Params {
-    // shared for all fractals
-    // lo_real: f32,
-    // lo_imag: f32,
-    // hi_real: f32,
-    // hi_imag: f32,
     center_real: f32,
     center_imag: f32,
     radius_real: f32,
     radius_imag: f32,
     width: u32,
     height: u32,
-
-    // mandelbrot specific stuff
-    z0_real: f32,
-    z0_imag: f32,
     max_depth: u32,
     cycle_depth: u32, // this is a ~sentinel for if it finds a cycle
+    escape_radius_2: f32,
+    fractal_type: u32,
+    point_real: f32,
+    point_imag: f32,
 }
 impl Params {
-    fn new(camera: Camera, width: u32, height: u32, z0: Complex, max_depth: u32) -> Self {
-        Params {
-            center_real: camera.center.real,
-            center_imag: camera.center.imag,
-            radius_real: camera.radius_real,
-            radius_imag: camera.radius_real * height as f32 / width as f32,
-            width,
-            height,
-            z0_real: z0.real,
-            z0_imag: z0.imag,
-            max_depth,
-            cycle_depth: CYCLE_DEPTH,
+    fn new(
+        camera: Camera,
+        width: u32,
+        height: u32,
+
+        ty: FractalType,
+        max_depth: u32,
+        escape_radius: f32,
+    ) -> Self {
+        // TODO: do this in a better way
+        match ty {
+            FractalType::Mandelbrot { z0 } => Self {
+                center_real: camera.center.real,
+                center_imag: camera.center.imag,
+                radius_real: camera.radius_real,
+                radius_imag: camera.radius_real * height as f32 / width as f32,
+                width,
+                height,
+                max_depth,
+                cycle_depth: CYCLE_DEPTH, // this is a ~sentinel for if it finds a cycle
+                escape_radius_2: escape_radius * escape_radius,
+                fractal_type: 0,
+                point_real: z0.real,
+                point_imag: z0.imag,
+            },
+            FractalType::Julia => todo!(),
         }
     }
 }
 
 pub(crate) struct Fractal {
-    ty: FractalType,
-
     // view stuff
-    // TODO: maybe store a Params and not these
     camera: Camera,
     // velocity: Camera,
     // TODO: make this in natural units
@@ -89,12 +97,16 @@ pub(crate) struct Fractal {
     shader_params_buffer: wgpu::Buffer,
     render_bind_group: wgpu::BindGroup,
     render_pipeline: wgpu::RenderPipeline,
+
+    // fractal stuff
+    ty: FractalType,
+    max_depth: u32,
+    escape_radius: f32,
 }
 impl Fractal {
     pub(crate) fn default(cc: &eframe::CreationContext<'_>, ty: FractalType) -> Self {
         Self::new(
             cc,
-            ty,
             Camera::default(),
             // Camera {
             //     center: Complex::zero(),
@@ -104,17 +116,21 @@ impl Fractal {
             // these needs to be nonzero to make a texture
             100,
             100,
+            ty,
+            1024,
+            10.0,
         )
     }
 
     pub(crate) fn new(
         cc: &eframe::CreationContext<'_>,
-        ty: FractalType,
         camera: Camera,
         velocity: eframe::egui::Vec2,
         width: u32,
         height: u32,
-        // coloring: MandelbrotColoring,
+        ty: FractalType,
+        max_depth: u32,
+        escape_radius: f32,
     ) -> Self {
         let render_state = cc.wgpu_render_state.as_ref().unwrap();
         let device = render_state.device.clone();
@@ -239,7 +255,6 @@ impl Fractal {
         });
 
         Self {
-            ty,
             camera,
             velocity,
             width,
@@ -253,6 +268,9 @@ impl Fractal {
             shader_params_buffer,
             render_bind_group,
             render_pipeline,
+            ty,
+            max_depth,
+            escape_radius,
         }
     }
 
@@ -324,7 +342,41 @@ impl Fractal {
     }
 
     /// fills the entire ui rect with the image
-    pub(crate) fn render_to_ui(&mut self, ui: &eframe::egui::Ui) {
+    pub(crate) fn render_to_ui(&mut self, ctx: &egui::Context, ui: &eframe::egui::Ui, name: &str) {
+        let dt = ctx.input(|input_state| input_state.stable_dt);
+        // TODO: allow dragging windows by their title bar
+        let r = ui.interact(
+            ui.available_rect_before_wrap(),
+            // ui.available_rect_before_wrap() - ui.min_rect(),
+            eframe::egui::Id::new(name),
+            egui::Sense::click_and_drag(),
+        );
+        // if self.trackpad {
+        //     self.pan(ctx.input(|i| i.smooth_scroll_delta));
+        // } else
+        if r.is_pointer_button_down_on() {
+            self.pan(r.drag_delta());
+            self.pan_velocity(r.drag_delta() / dt);
+        } else {
+            self.autopan(dt);
+        }
+
+        if ui.rect_contains_pointer(ui.available_rect_before_wrap()) {
+            if let Some(mouse_pos) = ctx.input(|i| i.pointer.latest_pos()) {
+                self.zoom(
+                    mouse_pos - ui.available_rect_before_wrap().center(),
+                    ctx.input(|i| {
+                        // if self.trackpad {
+                        //     i.zoom_delta()
+                        // } else {
+                        //     (i.smooth_scroll_delta.y / 300.0).exp()
+                        // }
+                        (i.smooth_scroll_delta.y / 300.0).exp()
+                    }),
+                )
+            }
+        }
+
         if self.width() != ui.available_width() as _ {
             self.set_width(ui.available_width() as _);
         }
@@ -357,12 +409,14 @@ impl Fractal {
         self.queue.write_buffer(
             &self.shader_params_buffer,
             0,
-            bytemuck::bytes_of(&match self.ty {
-                FractalType::Mandelbrot { z0, max_depth } => {
-                    Params::new(self.camera, self.width, self.height, z0, max_depth)
-                }
-                FractalType::Julia => todo!(),
-            }),
+            bytemuck::bytes_of(&Params::new(
+                self.camera,
+                self.width,
+                self.height,
+                self.ty,
+                self.max_depth,
+                self.escape_radius,
+            )),
         );
 
         // render pass

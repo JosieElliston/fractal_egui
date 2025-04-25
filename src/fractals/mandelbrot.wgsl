@@ -1,32 +1,41 @@
-// https://github.com/BenjaminAster/WebGPU-Mandelbrot/blob/main/shader.wgsl
 struct VertexOutput {
 	@builtin(position) position: vec4<f32>,
-	@location(0) fragmentPosition: vec2<f32>,
+	@location(0) fragment_position: vec2<f32>,
 }
 
+const FRACTAL_MANDELBROT: u32 = 0;
+const FRACTAL_JULIA: u32 = 1;
+
+// COLORING_DEPTH_NONE
+// COLORING_CYCLE_NONE
+// COLORING_CYCLE_LOG
+// COLORING_CYCLE_LOG_LOG
+
+// COLORING_FUNCTION_LINEAR
+// COLORING_FUNCTION_TURBO
+// COLORING_FUNCTION_CYCLIC_TURBO
+// COLORING_FUNCTION_RAINBOW
+
 struct Params {
-    // lo_real: f32,
-    // lo_imag: f32,
-    // hi_real: f32,
-    // hi_imag: f32,
     center_real: f32,
     center_imag: f32,
     radius_real: f32,
     radius_imag: f32,
     width: u32,
     height: u32,
-    z0_real: f32,
-    z0_imag: f32,
     max_depth: u32,
     cycle_depth: u32, // this is a ~sentinel for if it finds a cycle
+    escape_radius_2: f32,
+    fractal_type: u32,
+    point_real: f32,
+    point_imag: f32,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
 
-
-fn get_depth(c_real: f32, c_imag: f32) -> f32 {
-    var z_real = params.z0_real;
-    var z_imag = params.z0_imag;
+fn get_depth(z0_real: f32, z0_imag: f32, c_real: f32, c_imag: f32) -> f32 {
+    var z_real = z0_real;
+    var z_imag = z0_imag;
     var old_real = z_real;
     var old_imag = z_imag;
     var z_real2 = z_real * z_real;
@@ -35,7 +44,8 @@ fn get_depth(c_real: f32, c_imag: f32) -> f32 {
     var period_len = 1;
     for (var depth: u32 = 0; depth < params.max_depth; depth++) {
         // TODO: make escape_radius_2 not a constant
-        if (z_real2 + z_imag2 > 100.0) {
+        // TODO: does this read from memory each time?
+        if (z_real2 + z_imag2 > params.escape_radius_2) {
             // return f32(depth);
             // return f32(depth) - log(log(sqrt(z_real2 + z_imag2)) / log(10.0));
             return f32(depth) + 2.0 - log(log(z_real2 + z_imag2)) / log(2.0);
@@ -47,8 +57,7 @@ fn get_depth(c_real: f32, c_imag: f32) -> f32 {
 
         if ((old_real == z_real) && (old_imag == z_imag)) {
             // // TODO: remove
-            // return depth;
-            // return params.cycle_depth;
+            // return f32(depth);
             return f32(params.cycle_depth);
         }
 
@@ -60,19 +69,14 @@ fn get_depth(c_real: f32, c_imag: f32) -> f32 {
             old_imag = z_imag;
         }
     }
-    // return params.max_depth;
     return f32(params.max_depth);
 }
 
+// https://github.com/BenjaminAster/WebGPU-Mandelbrot/blob/main/shader.wgsl
+
 @vertex
-fn vertex_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
-    // this is so that i don't need to pass in a vertex buffer
-	// var positions: array<vec2<f32>, 4> = array<vec2<f32>, 4>(
-	// 	vec2<f32>(1.0, -1.0),
-	// 	vec2<f32>(1.0, 1.0),
-	// 	vec2<f32>(-1.0, -1.0),
-	// 	vec2<f32>(-1.0, 1.0),
-	// );
+fn vertex_main(@builtin(vertex_index) i: u32) -> VertexOutput {
+    // this is so that i don't need to deal with a vertex buffer
 	var positions: array<vec2<f32>, 6> = array<vec2<f32>, 6>(
 		vec2<f32>(1.0, -1.0),
 		vec2<f32>(1.0, 1.0),
@@ -81,47 +85,54 @@ fn vertex_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
 		vec2<f32>(-1.0, -1.0),
 		vec2<f32>(1.0, -1.0),
 	);
-	let position2d: vec2<f32> = positions[vertexIndex];
-	return VertexOutput(vec4<f32>(position2d, 0.0, 1.0), position2d);
+	let position: vec2<f32> = positions[i];
+	return VertexOutput(vec4<f32>(position, 0.0, 1.0), position);
 }
+
 
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    let depth = get_depth(
-        params.center_real + input.fragmentPosition.x * params.radius_real,
-        params.center_imag + input.fragmentPosition.y * params.radius_imag
-    );
-    var color: f32;
-    if depth == f32(params.max_depth) {
-        color = 0.0;
-    } else if depth == f32(params.cycle_depth) {
-        color = 0.0;
-    } else if depth == 0 {
-        color = 1.0;
+    if params.fractal_type == FRACTAL_MANDELBROT {
+        let depth = get_depth(
+            params.point_real,
+            params.point_imag,
+            params.center_real + input.fragment_position.x * params.radius_real,
+            params.center_imag + input.fragment_position.y * params.radius_imag
+        );
+        var color: f32;
+        if depth == f32(params.max_depth) {
+            color = 0.0;
+        } else if depth == f32(params.cycle_depth) {
+            color = 0.0;
+        } else if depth == 0 {
+            color = 1.0;
+        } else {
+            // color = clamp(0.1 * log(f32(depth)), 0.0, 1.0);
+            // color = clamp(0.1 * fract(log(f32(depth))), 0.0, 1.0);
+            
+            // do this so it's cyclic
+            // let t = log(f32(depth));
+            let t = fract(log(f32(depth)));
+            // let t = fract(log(log(f32(depth))));
+
+            // basic turbo
+            // return turbo(t, 0.0, 1.0);
+
+            // cyclic turbo
+            // if (t < 0.5) {
+            //     return turbo(t, 0.0, 0.5);
+            // } else {
+            //     return turbo(t, 1.0, 0.5);
+            // }
+
+            // rainbow
+            return rainbow(t);
+        }
+        return vec4<f32>(color, color, color, 1.0);
+
     } else {
-        // color = clamp(0.1 * log(f32(depth)), 0.0, 1.0);
-        // color = clamp(0.1 * fract(log(f32(depth))), 0.0, 1.0);
-        
-        // do this so it's cyclic
-        // let t = log(f32(depth));
-        let t = fract(log(f32(depth)));
-        // let t = fract(log(log(f32(depth))));
-
-
-        // basic turbo
-        // return turbo(t, 0.0, 1.0);
-
-        // cyclic turbo
-        // if (t < 0.5) {
-        //     return turbo(t, 0.0, 0.5);
-        // } else {
-        //     return turbo(t, 1.0, 0.5);
-        // }
-
-        // rainbow
-        return rainbow(t);
+        return vec4<f32>(1.0, 0.0, 0.0, 1.0);
     }
-    return vec4<f32>(color, color, color, 1.0);
 }
 
 fn rainbow(t: f32) -> vec4<f32> {
