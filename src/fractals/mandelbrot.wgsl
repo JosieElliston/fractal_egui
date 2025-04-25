@@ -24,7 +24,7 @@ struct Params {
 @group(0) @binding(0) var<uniform> params: Params;
 
 
-fn get_depth(c_real: f32, c_imag: f32) -> u32 {
+fn get_depth(c_real: f32, c_imag: f32) -> f32 {
     var z_real = params.z0_real;
     var z_imag = params.z0_imag;
     var old_real = z_real;
@@ -34,8 +34,11 @@ fn get_depth(c_real: f32, c_imag: f32) -> u32 {
     var period_i = 0;
     var period_len = 1;
     for (var depth: u32 = 0; depth < params.max_depth; depth++) {
-        if (z_real2 + z_imag2 > 4.0) {
-            return depth;
+        // TODO: make escape_radius_2 not a constant
+        if (z_real2 + z_imag2 > 100.0) {
+            // return f32(depth);
+            // return f32(depth) - log(log(sqrt(z_real2 + z_imag2)) / log(10.0));
+            return f32(depth) + 2.0 - log(log(z_real2 + z_imag2)) / log(2.0);
         }
         z_imag = (z_real + z_real) * z_imag + c_imag;
         z_real = z_real2 - z_imag2 + c_real;
@@ -46,6 +49,7 @@ fn get_depth(c_real: f32, c_imag: f32) -> u32 {
             // // TODO: remove
             // return depth;
             // return params.cycle_depth;
+            return f32(params.cycle_depth);
         }
 
         period_i += 1;
@@ -56,7 +60,8 @@ fn get_depth(c_real: f32, c_imag: f32) -> u32 {
             old_imag = z_imag;
         }
     }
-    return params.max_depth;
+    // return params.max_depth;
+    return f32(params.max_depth);
 }
 
 @vertex
@@ -80,14 +85,6 @@ fn vertex_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
 	return VertexOutput(vec4<f32>(position2d, 0.0, 1.0), position2d);
 }
 
-fn get_next_power_of_2(x: u32) -> u32 {
-    var i: u32 = 1;
-    while (i < x) {
-        i = i << 1;
-    }
-    return i;
-}
-
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let depth = get_depth(
@@ -95,31 +92,53 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         params.center_imag + input.fragmentPosition.y * params.radius_imag
     );
     var color: f32;
-    if depth == params.max_depth {
+    if depth == f32(params.max_depth) {
         color = 0.0;
-    } else if depth == params.cycle_depth {
+    } else if depth == f32(params.cycle_depth) {
         color = 0.0;
     } else if depth == 0 {
         color = 1.0;
     } else {
-        // color = clamp(log(f32(depth)) * 35.0 / 255.0, 0.0, 1.0);
         // color = clamp(0.1 * log(f32(depth)), 0.0, 1.0);
-        // TODO: if depth is very small, this might break
-        let next_power_of_2 = get_next_power_of_2(depth);
-        // if next_power_of_2 < depth {
-        //     return vec4<f32>(1.0, 0.0, 0.0, 1.0);
-        // }
-        let prev_power_of_2 = next_power_of_2 >> 1;
-        // if prev_power_of_2 > depth {
-        //     return vec4<f32>(0.0, 1.0, 0.0, 1.0);
-        // }
-        // let depth = f32(depth);
-        let t = f32(depth - prev_power_of_2) / f32(next_power_of_2 - prev_power_of_2);
-        color = t;
         
+        // do this so it's cyclic
+        let t = fract(log(f32(depth)));
+        // let t = fract(log(log(f32(depth))));
+
+        // basic turbo
+        // return turbo(t, 0.0, 1.0);
+
+        // cyclic turbo
+        // if (t < 0.5) {
+        //     return turbo(t, 0.0, 0.5);
+        // } else {
+        //     return turbo(t, 1.0, 0.5);
+        // }
+
+        // rainbow
+        return rainbow(t);
     }
-    // return vec4<f32>(color, color, color, 1.0);
-    return turbo(color, 0.0, 1.0);
+    return vec4<f32>(color, color, color, 1.0);
+}
+
+fn rainbow(t: f32) -> vec4<f32> {
+    let ts = abs(t - 0.5);
+    let h = 360.0 * t - 100.0;
+    let s = 1.5 - 1.5 * ts;
+    let l = 0.8 - 0.9 * ts;
+    return cubehelix(vec3(h, s, l));
+}
+
+fn cubehelix(c: vec3<f32>) -> vec4<f32> {
+    let h = (c.x + 120.0) * 3.1415926535897932384626433 / 180.0;
+    let l = c.z;
+    let a = c.y * l * (1.0 - l);
+    let cosh = cos(h);
+    let sinh = sin(h);
+    let r = min(1.0, (l - a * (0.14861 * cosh - 1.78277 * sinh)));
+    let g = min(1.0, (l - a * (0.29227 * cosh + 0.90649 * sinh)));
+    let b = min(1.0, (l + a * (1.97294 * cosh)));
+    return vec4(r, g, b, 1.0);
 }
 
 // Copyright 2019 Google LLC.
@@ -142,9 +161,9 @@ fn turbo(value: f32, min: f32, max: f32) -> vec4<f32> {
     let kBlueVec2: vec2<f32> = vec2(-89.90310912, 27.34824973);
 
     let x = saturate((value - min) / (max - min));
-    if abs(x) < 0.51 && abs(x) > 0.49 {
-        return vec4(1.0, 1.0, 1.0, 1.0);
-    }
+    // if abs(x) < 0.51 && abs(x) > 0.49 {
+    //     return vec4(1.0, 1.0, 1.0, 1.0);
+    // }
     let v4: vec4<f32> = vec4( 1.0, x, x * x, x * x * x);
     let v2: vec2<f32> = v4.zw * v4.z;
     return vec4(

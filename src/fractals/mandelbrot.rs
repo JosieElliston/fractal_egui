@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use eframe::wgpu::{self, util::DeviceExt};
 
-use crate::{Camera, Complex};
+use crate::{Camera, Complex, VELOCITY_DAMPING};
 
 use super::fractal::Fractal;
 
@@ -19,6 +19,9 @@ pub(crate) struct Mandelbrot {
     // position and size
     // TODO: maybe store a Params and not these
     camera: Camera,
+    // velocity: Camera,
+    // TODO: make this in natural units
+    velocity: eframe::egui::Vec2,
     width: u32,
     height: u32,
 
@@ -44,7 +47,12 @@ impl Mandelbrot {
         Self::new(
             cc,
             Camera::default(),
-            // this needs to be nonzero to make it happy
+            // Camera {
+            //     center: Complex::zero(),
+            //     radius_real: 0.0,
+            // },
+            eframe::egui::Vec2::ZERO,
+            // this needs to be nonzero to make a texture
             100,
             100,
             Complex::zero(),
@@ -57,6 +65,7 @@ impl Mandelbrot {
     pub(crate) fn new(
         cc: &eframe::CreationContext<'_>,
         camera: Camera,
+        velocity: eframe::egui::Vec2,
         width: u32,
         height: u32,
         z0: Complex,
@@ -185,6 +194,7 @@ impl Mandelbrot {
 
         Self {
             camera,
+            velocity,
             width,
             height,
             texture_id,
@@ -239,12 +249,24 @@ impl Fractal for Mandelbrot {
         if pan.x == 0.0 && pan.y == 0.0 {
             return;
         }
-
-        self.camera.center.real -= 2.0 * pan.x / self.width as f32 * self.camera.radius_real;
-        self.camera.center.imag += 2.0 * pan.y / self.height as f32
-            * (self.camera.radius_real * self.height as f32 / self.width as f32);
-
+        self.camera.center.real -=
+            (2.0 * pan.x as f64 / self.width as f64 * self.camera.radius_real as f64) as f32;
+        self.camera.center.imag += (2.0 * pan.y as f64 / self.height as f64
+            * (self.camera.radius_real as f64 * self.height as f64 / self.width as f64)) as f32;
         self.needs_update = true;
+    }
+
+    fn pan_velocity(&mut self, pan_velocity: eframe::egui::Vec2) {
+        self.velocity = if pan_velocity.length_sq() < 0.0001 {
+            eframe::egui::Vec2::ZERO
+        } else {
+            pan_velocity
+        };
+    }
+
+    fn autopan(&mut self, dt: f32) {
+        self.pan(self.velocity * dt);
+        self.pan_velocity(self.velocity * (1.0 - VELOCITY_DAMPING).powf(dt));
     }
 
     fn zoom(&mut self, mouse: eframe::egui::Vec2, zoom: f32) {

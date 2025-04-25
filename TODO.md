@@ -27,6 +27,7 @@ settings
     - julia: c0
     - metabrot: none
 - coloring
+    - slider to phase shift it
 - reset camera button / bind
 
 ## windows

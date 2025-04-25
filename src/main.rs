@@ -117,6 +117,8 @@ struct App {
     main: Box<dyn Fractal>,
     windows: Vec<FractalWindow>,
     show_overlay: bool,
+    /// whether to have nice trackpad panning and zooming at the cost of disabling the mouse
+    trackpad: bool,
 }
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -124,6 +126,7 @@ impl App {
             main: Box::new(Mandelbrot::default(cc)),
             windows: vec![],
             show_overlay: true,
+            trackpad: false,
         }
     }
 }
@@ -138,139 +141,39 @@ impl eframe::App for App {
                 // let _ = ui.button(format!("dt: {:?}", dt));
                 // let _ = ui.button(format!("1/dt: {:?}", 1.0 / dt));
 
-                // let scale = ui.available_rect_before_wrap().size().min_elem();
-                // let rect = egui::Rect::from_min_size(
-                //     ui.available_rect_before_wrap().min,
-                //     Vec2::new(scale, scale),
-                // );
-
-                // self.view_settings.texture_size = 2 * scale as u32;
-                // 2 * because something (maybe at the os level?) does antialiasing better with that
-                // let mut unit = scale / (2. * self.view_settings.zoom_scale); // TODO: what is this
-
                 // pan and zoom
                 let r = ui.interact(
                     ui.available_rect_before_wrap(),
                     eframe::egui::Id::new("main"),
                     egui::Sense::click_and_drag(),
                 );
-                self.main.pan(ctx.input(|i| i.smooth_scroll_delta));
-                self.main.pan(r.drag_delta());
+                if self.trackpad {
+                    self.main.pan(ctx.input(|i| i.smooth_scroll_delta));
+                } else if r.is_pointer_button_down_on() {
+                    self.main.pan(r.drag_delta());
+                    self.main.pan_velocity(r.drag_delta() / dt);
+                } else {
+                    self.main.autopan(dt);
+                }
 
-                // TODO: zooming with mouse
-
-                // egui::Sense::interactive(&self.view_settings)
-                // r.sense.set(egui::Sense::drag());
-
-                // println!("{}", ctx.input(|i| i.zoom_delta()));
                 if let Some(mouse_pos) = ctx.input(|i| i.pointer.latest_pos()) {
                     self.main.zoom(
                         mouse_pos - ui.available_rect_before_wrap().center(),
-                        ctx.input(|i| i.zoom_delta()),
+                        ctx.input(|i| {
+                            if self.trackpad {
+                                i.zoom_delta()
+                            } else {
+                                (i.smooth_scroll_delta.y / 300.0).exp()
+                            }
+                        }),
                     )
-                    // self.main.zoom(
-                    //     mouse_pos - ui.available_rect_before_wrap().center(),
-                    //     ctx.input(|i| i.smooth_scroll_delta.y),
-                    // );
-                    // ctx.input(|i| {
-                    //     i.events.iter().for_each(|e| {
-                    //         if let egui::Event::MouseWheel {
-                    //             unit,
-                    //             delta,
-                    //             modifiers,
-                    //         } = e
-                    //         {
-                    //             let zoom = match unit {
-                    //                 egui::MouseWheelUnit::Point => delta.y / 10000.0,
-                    //                 egui::MouseWheelUnit::Line => todo!(),
-                    //                 egui::MouseWheelUnit::Page => todo!(),
-                    //             };
-                    //             self.main.zoom(
-                    //                 mouse_pos - ui.available_rect_before_wrap().center(),
-                    //                 zoom,
-                    //             )
-                    //         }
-                    //     })
-                    // });
                 }
-
-                // if r.hovered() {
-                //     let scroll_delta = ctx.input(|i| i.smooth_scroll_delta.y / unit);
-                //     if scroll_delta.abs() > 0.001 {
-                //         self.view_settings.zoom_scale = (self.view_settings.zoom_scale - scroll_delta).max(0.1);
-                //         unit = scale / (2. * self.view_settings.zoom_scale);
-                //     }
-                // }
-
-                // let scale = egui_rect.size() / (1. * egui_rect.size().min_elem());
-                // let scale = [scale.x * self.scale, scale.y * self.scale];
-
-                // let screen_to_egui =
-                //     |pos: Pos| pos2(pos.x as f32, -pos.y as f32) * unit + cen.to_vec2();
-                // let egui_to_screen = |pos: Pos2| {
-                //     let pos = (pos - cen.to_vec2()) / unit;
-                //     Pos {
-                //         x: pos.x as f64,
-                //         y: -pos.y as f64,
-                //     }
-                // };
-
-                // if r.dragged_by(egui::PointerButton::Secondary) && r.drag_delta().length() > 0.1 {
-                //     if let Some(mpos) = r.interact_pointer_pos() {
-                //         let egui_to_geom = |pos: Pos2| {
-                //             let Pos { x, y } = egui_to_screen(pos);
-                //             cga2d::point(x, y)
-                //         };
-                //         let root_pos = egui_to_geom(mpos - r.drag_delta());
-                //         let end_pos = egui_to_geom(mpos);
-
-                //         let modifiers = ctx.input(|i| i.modifiers);
-
-                //         let ms: Vec<cga2d::Blade3> = self
-                //             .tiling
-                //             .mirrors
-                //             .iter()
-                //             .map(|&m| self.camera_transform.sandwich(m))
-                //             .collect();
-                //         let boundary = match (modifiers.command, modifiers.alt) {
-                //             (true, false) => {
-                //                 let third = if self.tiling.rank == 4 {
-                //                     !ms[3]
-                //                 } else {
-                //                     !(!ms[0] ^ !ms[1] ^ !ms[2])
-                //                 };
-                //                 !ms[1] ^ !ms[2] ^ third
-                //             }
-                //             (false, true) => {
-                //                 let third = if self.tiling.rank == 4 {
-                //                     !ms[3]
-                //                 } else {
-                //                     !(!ms[0] ^ !ms[1] ^ !ms[2])
-                //                 };
-                //                 !ms[0] ^ !ms[1] ^ third
-                //             }
-                //             _ => !ms[0] ^ !ms[1] ^ !ms[2],
-                //         }; // the boundary to fix when transforming space
-
-                //         let init_refl = !(root_pos ^ end_pos) ^ !boundary; // get root_pos to end_pos
-                //         let f = end_pos ^ !boundary;
-                //         let final_refl = !(!init_refl ^ f) ^ f; // restore orientation fixing the "straight line" from root_pos to end_pos
-
-                //         self.camera_transform =
-                //             (final_refl * init_refl * self.camera_transform).normalize();
-                //     }
-                // }
-
-                // egui::Window::new("My Window").show(ctx, |ui| {
-                //     ui.label("Hello World!");
-                // });
 
                 if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
                     self.show_overlay = !self.show_overlay;
                 }
 
                 self.main.render_to_ui(ui);
-
                 if self.show_overlay {
                     for window in &mut self.windows {
                         // TODO: better title
@@ -291,13 +194,13 @@ impl eframe::App for App {
                     }
 
                     // settings ui
-                    egui::Frame::popup(ui.style())
-                        // .outer_margin(10.0)
-                        // .shadow(egui::Shadow::NONE)
-                        // .stroke(egui::Stroke::NONE)
-                        .show(ui, |ui| {
-                            egui::CollapsingHeader::new("settings").show(ui, |ui| {});
-                        });
+                    // egui::Frame::popup(ui.style())
+                    //     // .outer_margin(10.0)
+                    //     // .shadow(egui::Shadow::NONE)
+                    //     // .stroke(egui::Stroke::NONE)
+                    //     .show(ui, |ui| {
+                    //         egui::CollapsingHeader::new("settings").show(ui, |ui| {});
+                    //     });
                 }
             });
     }
