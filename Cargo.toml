@@ -1,0 +1,8 @@
+[package]
+name = "fractal_egui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bytemuck = "1.22.0"
+eframe = { version = "0.31.1", features = ["wgpu"] }
