@@ -1,7 +1,7 @@
 mod fractals;
 
 use eframe::egui::{self, Vec2};
-use fractals::{fractal::*, mandelbrot::Mandelbrot};
+use fractals::fractal::*;
 
 fn main() -> eframe::Result {
     // std::env::set_var("RUST_BACKTRACE", "1");
@@ -22,12 +22,17 @@ struct Complex {
     imag: f32,
 }
 impl Complex {
-    fn zero() -> Self {
-        Self {
-            real: 0.0,
-            imag: 0.0,
-        }
-    }
+    const ZERO: Complex = Complex {
+        real: 0.0,
+        imag: 0.0,
+    };
+
+    // fn zero() -> Self {
+    //     Self {
+    //         real: 0.0,
+    //         imag: 0.0,
+    //     }
+    // }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -81,9 +86,11 @@ impl Default for Camera {
         }
     }
 }
+// struct CameraVelocity
+// struct CameraMotion
 
 // struct Fractal {
-//     fractal: Box<dyn Fractal>,
+//     fractal: Fractal,
 //     needs_update: bool,
 // }
 // impl Fractal {
@@ -108,14 +115,15 @@ impl Default for Camera {
 //     }
 // }
 
-struct FractalWindow {
-    fractal: Box<dyn Fractal>,
-    is_open: bool,
-}
+// struct FractalWindow {
+//     fractal: Fractal,
+//     is_open: bool,
+// }
 
 struct App {
-    main: Box<dyn Fractal>,
-    windows: Vec<FractalWindow>,
+    main: Fractal,
+    // windows: Vec<FractalWindow>,
+    windows: Vec<Fractal>,
     show_overlay: bool,
     /// whether to have nice trackpad panning and zooming at the cost of disabling the mouse
     trackpad: bool,
@@ -123,7 +131,7 @@ struct App {
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         Self {
-            main: Box::new(Mandelbrot::default(cc)),
+            main: Fractal::default(cc, FractalType::default()),
             windows: vec![],
             show_overlay: true,
             trackpad: false,
@@ -175,23 +183,25 @@ impl eframe::App for App {
 
                 self.main.render_to_ui(ui);
                 if self.show_overlay {
-                    for window in &mut self.windows {
-                        // TODO: better title
+                    self.windows.retain_mut(|fractal| {
+                        // TODO: better title name
                         // TODO: make title smaller
-                        egui::Window::new("Fractal")
+                        let mut open = true;
+                        egui::Window::new("fractal")
                             // .open(&mut is_open)
                             // .vscroll(false)
                             .resizable(true)
                             // .title_bar(false)
                             // .default_open(default_open)
                             .default_size([250.0, 250.0])
-                            .open(&mut window.is_open)
+                            .open(&mut open)
                             .resizable(true)
                             .show(ctx, |ui| {
-                                window.fractal.render_to_ui(ui);
+                                fractal.render_to_ui(ui);
                                 ui.allocate_space(ui.available_size());
                             });
-                    }
+                        open
+                    });
 
                     // settings ui
                     // egui::Frame::popup(ui.style())

@@ -6,6 +6,8 @@
 - think about thread allocation and workgroup size and stuff
 - some needs_update doesn't require regening everything
 - subsamples
+- only recompute the delta on pan
+- video of mandelbrot at (-1 + 0i) going up frame synced
 
 ## requirements
 

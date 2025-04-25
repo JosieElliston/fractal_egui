@@ -100,10 +100,13 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         color = 1.0;
     } else {
         // color = clamp(0.1 * log(f32(depth)), 0.0, 1.0);
+        // color = clamp(0.1 * fract(log(f32(depth))), 0.0, 1.0);
         
         // do this so it's cyclic
+        // let t = log(f32(depth));
         let t = fract(log(f32(depth)));
         // let t = fract(log(log(f32(depth))));
+
 
         // basic turbo
         // return turbo(t, 0.0, 1.0);
