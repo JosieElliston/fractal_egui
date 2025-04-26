@@ -1,7 +1,7 @@
-mod fractals;
+mod fractal;
 
-use eframe::egui::{self, Vec2};
-use fractals::fractal::*;
+use eframe::egui;
+use fractal::*;
 
 fn main() -> eframe::Result {
     // std::env::set_var("RUST_BACKTRACE", "1");
@@ -125,29 +125,30 @@ struct App {
     main: Fractal,
     // windows: Vec<FractalWindow>,
     settings_main: bool,
-    fractal_windows: Vec<(Fractal, String)>,
+    fractal_windows: Vec<Fractal>,
     settings_windows: Vec<bool>,
     point: Complex,
     show_overlay: bool,
-    /// whether to have nice trackpad panning and zooming at the cost of disabling the mouse
-    trackpad: bool,
+    // /// whether to have nice trackpad panning and zooming at the cost of disabling the mouse
+    // trackpad: bool,
+    fractal_counter: usize,
+    dts: egui::util::History<f32>,
 }
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let render_state = cc.wgpu_render_state.clone().unwrap();
         Self {
-            main: Fractal::default(&render_state, FractalType::new_mandelbrot(Complex::ZERO)),
+            main: Fractal::default(&render_state, 0, FractalType::new_mandelbrot(Complex::ZERO)),
+            // main: Fractal::default(&render_state, 0, FractalType::new_julia(Complex::ZERO)),
             settings_main: false,
             fractal_windows: vec![],
-            // fractal_windows: vec![(
-            //     Fractal::default(&render_state, FractalType::new_mandelbrot(Complex::ZERO)),
-            //     "test".to_string(),
-            // )],
             settings_windows: vec![],
             point: Complex::ZERO,
             show_overlay: true,
-            trackpad: false,
+            // trackpad: false,
             render_state,
+            fractal_counter: 1,
+            dts: egui::util::History::new(2..100, 1.0),
         }
     }
 }
@@ -157,17 +158,16 @@ impl eframe::App for App {
         egui::CentralPanel::default()
             .frame(egui::Frame::new())
             .show(ctx, |ui| {
-                let dt = ctx.input(|input_state| input_state.stable_dt);
-                // println!("dt: {:?}", dt);
-                // let _ = ui.button(format!("dt: {:?}", dt));
-                // let _ = ui.button(format!("1/dt: {:?}", 1.0 / dt));
+                self.dts.add(
+                    ctx.input(|input_state| input_state.time),
+                    ctx.input(|input_state| input_state.stable_dt),
+                );
 
                 if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
                     self.show_overlay = !self.show_overlay;
                 }
 
-                let prev_point = self.point;
-
+                // TODO: possibly fractals should know whether they're main and settings_open
                 // TODO: better name for the main fractal so swapping doesn't break the names
                 // TODO: clicking on the background should deselect/unfocus the windows
                 {
@@ -192,7 +192,7 @@ impl eframe::App for App {
                         let SettingsUiResponse {
                             is_settings_open,
                             swap_main: _,
-                        } = self.main.settings_ui(ctx, ui, "main");
+                        } = self.main.settings_ui(ctx, ui);
                         self.settings_main = is_settings_open;
                     }
                     assert_eq!(self.fractal_windows.len(), self.settings_windows.len());
@@ -201,9 +201,9 @@ impl eframe::App for App {
                         // TODO: better title name
                         // TODO: make title smaller
                         // TODO: make it not have a shadow
-                        let (fractal, name) = &mut self.fractal_windows[i];
+                        let fractal = &mut self.fractal_windows[i];
                         let mut fractal_open = true;
-                        egui::Window::new(&*name)
+                        egui::Window::new(fractal.name())
                             .resizable(true)
                             // .shadow(egui::Shadow::NONE)
                             // .title_bar(false)
@@ -224,10 +224,10 @@ impl eframe::App for App {
                             let SettingsUiResponse {
                                 is_settings_open,
                                 swap_main,
-                            } = fractal.settings_ui(ctx, ui, name);
+                            } = fractal.settings_ui(ctx, ui);
                             self.settings_windows[i] = is_settings_open;
                             if swap_main {
-                                std::mem::swap(&mut self.main, &mut self.fractal_windows[i].0);
+                                std::mem::swap(&mut self.main, &mut self.fractal_windows[i]);
                                 std::mem::swap(
                                     &mut self.settings_main,
                                     &mut self.settings_windows[i],
@@ -252,6 +252,8 @@ impl eframe::App for App {
                                 .shadow(egui::Shadow::NONE)
                                 .show(ui, |ui| {
                                     egui::CollapsingHeader::new("global").show(ui, |ui| {
+                                        let average_dt = self.dts.average().expect("we added one this frame so dts must be non-empty");
+                                        ui.label(format!("    dt: {:08.05}\n1/dt: {:08.05}", average_dt, 1.0 / average_dt,));
                                         // println!(
                                         //     "center: {} + {}i, real_radius: {}",
                                         //     self.main.camera().center.real,
@@ -260,7 +262,7 @@ impl eframe::App for App {
                                         // );
                                         // TODO: clicking copies the camera?
                                         ui.label(format!(
-                                            "center: {} + {}i\nreal_radius: {}",
+                                            "center: {:12.09} + {:12.09}i\nreal_radius: {:12.09}",
                                             self.main.camera().center.real,
                                             self.main.camera().center.imag,
                                             self.main.camera().radius_real,
@@ -276,30 +278,35 @@ impl eframe::App for App {
                                         );
 
                                         if ui.button("add mandelbrot").clicked() {
-                                            self.fractal_windows.push((
-                                                Fractal::default(
-                                                    &self.render_state,
-                                                    FractalType::new_mandelbrot(Complex::ZERO),
-                                                ),
-                                                format!(
-                                                    "mandelbrot {}",
-                                                    self.fractal_windows.len()
-                                                ),
+                                            self.fractal_windows.push(Fractal::default(
+                                                &self.render_state,
+                                                self.fractal_counter,
+                                                FractalType::new_mandelbrot(Complex::ZERO),
                                             ));
                                             self.settings_windows.push(false);
+                                            self.fractal_counter += 1;
+                                        }
+                                        if ui.button("add julia set").clicked() {
+                                            self.fractal_windows.push(Fractal::default(
+                                                &self.render_state,
+                                                self.fractal_counter,
+                                                FractalType::new_julia(Complex::ZERO),
+                                            ));
+                                            self.settings_windows.push(false);
+                                            self.fractal_counter += 1;
                                         }
                                     });
                                 });
                         });
                 }
 
-                // TODO: point may not the the correct abstraction
-                if self.point != prev_point {
-                    self.main.set_point(self.point);
-                    for (fractal, _) in &mut self.fractal_windows {
-                        fractal.set_point(self.point);
-                    }
-                }
+                // // TODO: point may not the the correct abstraction
+                // if self.point != prev_point {
+                //     self.main.set_point(self.point);
+                //     for fractal in &mut self.fractal_windows {
+                //         fractal.set_point(self.point);
+                //     }
+                // }
             });
     }
 }

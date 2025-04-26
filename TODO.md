@@ -8,6 +8,7 @@
 - subsamples
 - only recompute the delta on pan
 - video of mandelbrot at (-1 + 0i) going up frame synced
+- burning ship fractal (take abs at each point)
 
 ## requirements
 

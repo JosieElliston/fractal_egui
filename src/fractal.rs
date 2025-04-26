@@ -7,18 +7,31 @@ use eframe::{
 
 use crate::{Camera, Complex};
 
-const CYCLE_DEPTH: u32 = u32::MAX;
 const VELOCITY_DAMPING: f32 = 0.9999;
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum FractalType {
     Mandelbrot { z0: Complex } = 0,
-    Julia = 1,
+    Metabrot { sub_fractal_width: u32 } = 1,
+    JuliaSet { c: Complex } = 2,
+    MetaJulia { sub_fractal_width: u32 } = 3,
 }
 impl FractalType {
     pub(crate) fn new_mandelbrot(z0: Complex) -> Self {
         Self::Mandelbrot { z0 }
+    }
+
+    pub(crate) fn new_metabrot(sub_fractal_width: u32) -> Self {
+        Self::Metabrot { sub_fractal_width }
+    }
+
+    pub(crate) fn new_julia(c: Complex) -> Self {
+        Self::JuliaSet { c }
+    }
+
+    pub(crate) fn new_meta_julia(sub_fractal_width: u32) -> Self {
+        Self::MetaJulia { sub_fractal_width }
     }
 }
 // impl Default for FractalType {
@@ -30,25 +43,29 @@ impl FractalType {
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::NoUninit)]
 struct Params {
+    // view params
     center_real: f32,
     center_imag: f32,
     radius_real: f32,
     radius_imag: f32,
-    width: u32,
-    height: u32,
+
+    // shared params
     max_depth: u32,
-    cycle_depth: u32, // this is a ~sentinel for if it finds a cycle
     escape_radius_2: f32,
+
+    // specialized params
     fractal_type: u32,
+    // either z0 or c depending on fractal_type
     point_real: f32,
     point_imag: f32,
+    // used in the the meta-fractals
+    sub_fractal_width: u32,
 }
 impl Params {
     fn new(
         camera: Camera,
         width: u32,
         height: u32,
-
         ty: FractalType,
         max_depth: u32,
         escape_radius: f32,
@@ -60,16 +77,49 @@ impl Params {
                 center_imag: camera.center.imag,
                 radius_real: camera.radius_real,
                 radius_imag: camera.radius_real * height as f32 / width as f32,
-                width,
-                height,
                 max_depth,
-                cycle_depth: CYCLE_DEPTH, // this is a ~sentinel for if it finds a cycle
                 escape_radius_2: escape_radius * escape_radius,
                 fractal_type: 0,
                 point_real: z0.real,
                 point_imag: z0.imag,
+                sub_fractal_width: 0,
             },
-            FractalType::Julia => todo!(),
+            FractalType::Metabrot { sub_fractal_width } => Self {
+                center_real: camera.center.real,
+                center_imag: camera.center.imag,
+                radius_real: camera.radius_real,
+                radius_imag: camera.radius_real * height as f32 / width as f32,
+                max_depth,
+                escape_radius_2: escape_radius * escape_radius,
+                fractal_type: 1,
+                point_real: 0.0,
+                point_imag: 0.0,
+                sub_fractal_width,
+            },
+            FractalType::JuliaSet { c } => Self {
+                center_real: camera.center.real,
+                center_imag: camera.center.imag,
+                radius_real: camera.radius_real,
+                radius_imag: camera.radius_real * height as f32 / width as f32,
+                max_depth,
+                escape_radius_2: escape_radius * escape_radius,
+                fractal_type: 2,
+                point_real: c.real,
+                point_imag: c.imag,
+                sub_fractal_width: 0,
+            },
+            FractalType::MetaJulia { sub_fractal_width } => Self {
+                center_real: camera.center.real,
+                center_imag: camera.center.imag,
+                radius_real: camera.radius_real,
+                radius_imag: camera.radius_real * height as f32 / width as f32,
+                max_depth,
+                escape_radius_2: escape_radius * escape_radius,
+                fractal_type: 3,
+                point_real: 0.0,
+                point_imag: 0.0,
+                sub_fractal_width,
+            },
         }
     }
 }
@@ -92,6 +142,7 @@ pub(crate) struct Fractal {
     velocity: eframe::egui::Vec2,
     // width: u32,
     // height: u32,
+    /// this should really be a (u32, u32) but egui uses floats for some reason
     size: eframe::egui::Vec2,
 
     // // this is so that we can manually do subsampling,
@@ -115,13 +166,17 @@ pub(crate) struct Fractal {
     render_pipeline: wgpu::RenderPipeline,
 
     // fractal stuff
+    id: usize,
     ty: FractalType,
     max_depth: u32,
     escape_radius: f32,
-    settings_open: bool,
 }
 impl Fractal {
-    pub(crate) fn default(render_state: &eframe::egui_wgpu::RenderState, ty: FractalType) -> Self {
+    pub(crate) fn default(
+        render_state: &eframe::egui_wgpu::RenderState,
+        id: usize,
+        ty: FractalType,
+    ) -> Self {
         Self::new(
             render_state,
             Camera::default(),
@@ -132,6 +187,7 @@ impl Fractal {
             eframe::egui::Vec2::ZERO,
             // these needs to be nonzero to make a texture
             egui::Vec2::new(1.0, 1.0),
+            id,
             ty,
             1024,
             10.0,
@@ -143,6 +199,7 @@ impl Fractal {
         camera: Camera,
         velocity: eframe::egui::Vec2,
         size: eframe::egui::Vec2,
+        id: usize,
         ty: FractalType,
         max_depth: u32,
         escape_radius: f32,
@@ -151,7 +208,7 @@ impl Fractal {
         let queue = render_state.queue.clone();
         let renderer = render_state.renderer.clone();
 
-        let shader_module = device.create_shader_module(wgpu::include_wgsl!("mandelbrot.wgsl"));
+        let shader_module = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
 
         let shader_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("shader_params_buffer"),
@@ -281,10 +338,10 @@ impl Fractal {
             shader_params_buffer,
             render_bind_group,
             render_pipeline,
+            id,
             ty,
             max_depth,
             escape_radius,
-            settings_open: false,
         }
     }
 
@@ -294,6 +351,19 @@ impl Fractal {
 
     fn texture_id(&self) -> eframe::egui::TextureId {
         self.texture_id
+    }
+
+    pub(crate) fn name(&self) -> String {
+        format!(
+            "{} {}",
+            match self.ty {
+                FractalType::Mandelbrot { .. } => "mandelbrot",
+                FractalType::Metabrot { .. } => "metabrot",
+                FractalType::JuliaSet { .. } => "julia set",
+                FractalType::MetaJulia { .. } => "metajulia",
+            },
+            self.id
+        )
     }
 
     pub(crate) fn pan(&mut self, pan: eframe::egui::Vec2) {
@@ -332,15 +402,20 @@ impl Fractal {
         self.needs_update = true;
     }
 
-    pub(crate) fn set_point(&mut self, point: Complex) {
-        match &mut self.ty {
-            FractalType::Mandelbrot { z0 } => {
-                *z0 = point;
-                self.needs_update = true;
-            }
-            FractalType::Julia => todo!(),
-        }
-    }
+    // pub(crate) fn set_point(&mut self, point: Complex) {
+    //     match &mut self.ty {
+    //         FractalType::Mandelbrot { z0 } => {
+    //             *z0 = point;
+    //             self.needs_update = true;
+    //         }
+    //         FractalType::JuliaSet { c } => {
+    //             *c = point;
+    //             self.needs_update = true;
+    //         }
+    //         FractalType::Metabrot { .. } => (),
+    //         FractalType::MetaJulia { .. } => (),
+    //     }
+    // }
 
     /// fills the entire ui rect with the image.
     /// draws the point if it is Some.
@@ -438,20 +513,19 @@ impl Fractal {
         &mut self,
         ctx: &egui::Context,
         ui: &mut eframe::egui::Ui,
-        name: &str,
     ) -> SettingsUiResponse {
         let mut open = true;
         let mut swap_main = false;
-        egui::Window::new(format!("{name} settings"))
+        egui::Window::new(format!("{} settings", self.name()))
             // .title_bar(false)
             .open(&mut open)
             .show(ctx, |ui| {
                 swap_main = ui.button("swap main").clicked();
 
-                ui.label("max depth");
                 let mut max_depth = self.max_depth;
                 ui.add(
                     egui::Slider::new(&mut max_depth, 1..=1024)
+                        .text("max depth")
                         .clamping(egui::SliderClamping::Never),
                 );
                 if max_depth != self.max_depth {
@@ -459,18 +533,60 @@ impl Fractal {
                     self.needs_update = true;
                 }
 
-                ui.label("escape radius");
                 let mut escape_radius = self.escape_radius;
                 ui.add(
                     egui::Slider::new(&mut escape_radius, 0.0..=10.0)
+                        .text("escape radius")
                         .clamping(egui::SliderClamping::Never),
                 );
                 if escape_radius != self.escape_radius {
                     self.escape_radius = escape_radius;
                     self.needs_update = true;
                 }
+
+                match &mut self.ty {
+                    FractalType::Mandelbrot { z0 } => {
+                        let mut new_z0 = *z0;
+                        ui.add(
+                            egui::Slider::new(&mut new_z0.real, -2.0..=2.0)
+                                .text("z0 real")
+                                .clamping(egui::SliderClamping::Never),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut new_z0.imag, -2.0..=2.0)
+                                .text("z0 imag")
+                                .clamping(egui::SliderClamping::Never),
+                        );
+                        if new_z0 != *z0 {
+                            *z0 = new_z0;
+                            self.needs_update = true;
+                        }
+                    }
+                    FractalType::Metabrot { .. } => (),
+                    FractalType::JuliaSet { c } => {
+                        let mut new_c = *c;
+                        ui.add(
+                            egui::Slider::new(&mut new_c.real, -2.0..=2.0)
+                                .text("c real")
+                                .clamping(egui::SliderClamping::Never),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut new_c.imag, -2.0..=2.0)
+                                .text("c imag")
+                                .clamping(egui::SliderClamping::Never),
+                        );
+                        if new_c != *c {
+                            *c = new_c;
+                            self.needs_update = true;
+                        }
+                    }
+                    FractalType::MetaJulia { .. } => (),
+                }
             });
-        SettingsUiResponse { is_settings_open: open, swap_main }
+        SettingsUiResponse {
+            is_settings_open: open,
+            swap_main,
+        }
     }
 
     /// render the fractal to a wgpu texture and resets needs_update

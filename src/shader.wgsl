@@ -3,8 +3,12 @@ struct VertexOutput {
 	@location(0) fragment_position: vec2<f32>,
 }
 
+const CYCLE_DEPTH: u32 = 0xFFFFFFFF;
+
 const FRACTAL_MANDELBROT: u32 = 0;
-const FRACTAL_JULIA: u32 = 1;
+const FRACTAL_METABROT: u32 = 1;
+const FRACTAL_JULIA_SET: u32 = 2;
+const FRACTAL_METAJULIA: u32 = 3;
 
 // COLORING_DEPTH_NONE
 // COLORING_CYCLE_NONE
@@ -17,18 +21,23 @@ const FRACTAL_JULIA: u32 = 1;
 // COLORING_FUNCTION_RAINBOW
 
 struct Params {
+    // view params
     center_real: f32,
     center_imag: f32,
     radius_real: f32,
     radius_imag: f32,
-    width: u32,
-    height: u32,
+
+    // shared params
     max_depth: u32,
-    cycle_depth: u32, // this is a ~sentinel for if it finds a cycle
     escape_radius_2: f32,
+
+    // specialized params
     fractal_type: u32,
+    // either z0 or c depending on fractal_type
     point_real: f32,
     point_imag: f32,
+    // used in the the meta-fractals
+    sub_fractal_width: u32,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -58,7 +67,7 @@ fn get_depth(z0_real: f32, z0_imag: f32, c_real: f32, c_imag: f32) -> f32 {
         if ((old_real == z_real) && (old_imag == z_imag)) {
             // // TODO: remove
             // return f32(depth);
-            return f32(params.cycle_depth);
+            return f32(CYCLE_DEPTH);
         }
 
         period_i += 1;
@@ -95,18 +104,30 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let real: f32 = params.center_real + input.fragment_position.x * params.radius_real;
     let imag: f32 = params.center_imag + input.fragment_position.y * params.radius_imag;
     if false {
+        // debug grid
         return vec4<f32>(fract(real), fract(imag), 0.0, 1.0);
-    } else if params.fractal_type == FRACTAL_MANDELBROT {
-        let depth = get_depth(
-            params.point_real,
-            params.point_imag,
-            real,
-            imag,
-        );
+    } else if params.fractal_type == FRACTAL_MANDELBROT || params.fractal_type == FRACTAL_JULIA_SET  {
+        var depth: f32;
+        if params.fractal_type == FRACTAL_MANDELBROT {
+            depth = get_depth(
+                params.point_real,
+                params.point_imag,
+                real,
+                imag,
+            );
+        } else {
+            depth = get_depth(
+                real,
+                imag,
+                params.point_real,
+                params.point_imag,
+            );
+        }
+        
         var color: f32;
         if depth == f32(params.max_depth) {
             color = 0.0;
-        } else if depth == f32(params.cycle_depth) {
+        } else if depth == f32(CYCLE_DEPTH) {
             color = 0.0;
         } else if depth == 0 {
             color = 1.0;
@@ -139,7 +160,6 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
             return rainbow(t);
         }
         return vec4<f32>(color, color, color, 1.0);
-
     } else {
         return vec4<f32>(1.0, 0.0, 0.0, 1.0);
     }
