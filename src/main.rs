@@ -123,7 +123,9 @@ impl Default for Camera {
 struct App {
     main: Fractal,
     // windows: Vec<FractalWindow>,
+    settings_main: bool,
     fractal_windows: Vec<(Fractal, String)>,
+    settings_windows: Vec<bool>,
     show_overlay: bool,
     /// whether to have nice trackpad panning and zooming at the cost of disabling the mouse
     trackpad: bool,
@@ -132,9 +134,13 @@ impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         Self {
             main: Fractal::default(cc, FractalType::default()),
+            settings_main: false,
             // fractal_windows: vec![],
-            fractal_windows: vec![(Fractal::default(cc, FractalType::default()), "test".into())],
-            // settings_windows: vec![],
+            fractal_windows: vec![(
+                Fractal::default(cc, FractalType::default()),
+                "test".to_string(),
+            )],
+            settings_windows: vec![false],
             show_overlay: true,
             trackpad: false,
         }
@@ -156,50 +162,39 @@ impl eframe::App for App {
                 }
 
                 // TODO: remove name
-                self.main.render_to_ui(ctx, ui);
+                // TODO: clicking on the background should deselect/unfocus the windows
+                self.settings_main |= self.main.ui(ctx, ui);
                 if self.show_overlay {
-                    self.fractal_windows.retain_mut(|(fractal, name)| {
+                    if self.settings_main {
+                        self.settings_main = self.main.settings_ui(ctx, ui, "main");
+                    }
+                    assert_eq!(self.fractal_windows.len(), self.settings_windows.len());
+                    let mut i = 0;
+                    while i < self.fractal_windows.len() {
                         // TODO: better title name
                         // TODO: make title smaller
                         // TODO: make it not have a shadow
-                        let mut open = true;
-                        egui::Window::new(&*name)
-                            // .open(&mut is_open)
-                            // .vscroll(false)
+                        let (fractal, name) = &mut self.fractal_windows[i];
+                        let mut fractal_open = true;
+                        egui::Window::new("fractal")
                             .resizable(true)
                             // .title_bar(false)
                             // .default_open(default_open)
                             .default_size([250.0, 250.0])
-                            .open(&mut open)
+                            .open(&mut fractal_open)
                             .show(ctx, |ui| {
-                                // Scene::new()
-                                //     .max_inner_size([350.0, 1000.0])
-                                //     .zoom_range(0.1..=2.0)
-                                //     .show(ui, &mut self.scene_rect, |ui| {
-                                //         reset_view = ui.button("Reset view").clicked();
-
-                                //         ui.add_space(16.0);
-
-                                //         self.widget_gallery.ui(ui);
-
-                                //         ui.put(
-                                //             Rect::from_min_size(
-                                //                 Pos2::new(0.0, -64.0),
-                                //                 Vec2::new(200.0, 16.0),
-                                //             ),
-                                //             egui::Label::new("You can put a widget anywhere")
-                                //                 .selectable(false),
-                                //         );
-
-                                //         inner_rect = ui.min_rect();
-                                //     })
-                                //     .response;
-
-                                fractal.render_to_ui(ctx, ui);
-                                // ui.allocate_space(ui.available_size());
+                                self.settings_windows[i] |= fractal.ui(ctx, ui);
                             });
-                        open
-                    });
+                        if self.settings_windows[i] {
+                            self.settings_windows[i] = fractal.settings_ui(ctx, ui, &name);
+                        }
+                        if !fractal_open {
+                            self.fractal_windows.swap_remove(i);
+                            self.settings_windows.swap_remove(i);
+                        } else {
+                            i += 1;
+                        }
+                    }
 
                     // settings ui
                     // egui::Frame::popup(ui.style())

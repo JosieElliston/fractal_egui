@@ -314,16 +314,63 @@ impl Fractal {
         self.needs_update = true;
     }
 
-    /// fills the entire ui rect with the image
-    pub(crate) fn render_to_ui(
-        &mut self,
-        ctx: &egui::Context,
-        ui: &mut eframe::egui::Ui,
-    ) {
-        let dt = ctx.input(|input_state| input_state.stable_dt);
-        let rect = ui.available_rect_before_wrap();
+    /// returns whether the settings ui should still be open
+    pub(crate) fn settings_ui(&mut self, ctx: &egui::Context, ui: &mut eframe::egui::Ui, name: &str) -> bool {
+        // if ui.button("Settings").clicked() {
+        //     self.settings_open = !self.settings_open;
+        // }
+        // if self.settings_open {
+        //     egui::collapsing_header::CollapsingHeader::new("Settings")
+        //         .default_open(true)
+        //         .show(ui, |ui| {
+        //             ui.label("Max Depth");
+        //             ui.add(egui::Slider::u32(&mut self.max_depth, 1..=1000));
+        //             ui.label("Escape Radius");
+        //             ui.add(egui::Slider::f32(&mut self.escape_radius, 1.0..=100.0));
+        //         });
+        // }
 
+        let mut open = true;
+        egui::Window::new(format!("{name} settings"))
+            // .title_bar(false)
+            // .default_open(default_open)
+            // .default_size([250.0, 250.0])
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.label("max depth");
+                let mut max_depth = self.max_depth;
+                ui.add(
+                    egui::Slider::new(&mut max_depth, 1..=1024)
+                        .clamping(egui::SliderClamping::Never),
+                );
+                if max_depth != self.max_depth {
+                    self.max_depth = max_depth;
+                    self.needs_update = true;
+                }
+
+                ui.label("escape radius");
+                let mut escape_radius = self.escape_radius;
+                ui.add(
+                    egui::Slider::new(&mut escape_radius, 0.0..=10.0)
+                        .clamping(egui::SliderClamping::Never),
+                );
+                if escape_radius != self.escape_radius {
+                    self.escape_radius = escape_radius;
+                    self.needs_update = true;
+                }
+            });
+        open
+    }
+
+    /// fills the entire ui rect with the image
+    ///
+    /// returns whether the settings ui should be open
+    pub(crate) fn ui(&mut self, ctx: &egui::Context, ui: &mut eframe::egui::Ui) -> bool {
+        let rect = ui.available_rect_before_wrap();
         let r = ui.allocate_rect(rect, egui::Sense::click_and_drag());
+
+        // camera stuff
+        let dt = ctx.input(|input_state| input_state.stable_dt);
         // if self.trackpad {
         //     self.pan(ctx.input(|i| i.smooth_scroll_delta));
         // } else
@@ -333,7 +380,6 @@ impl Fractal {
         } else {
             self.autopan(dt);
         }
-
         // if r.hover_pos()
         if r.contains_pointer() {
             if let Some(mouse_pos) = ctx.input(|i| i.pointer.latest_pos()) {
@@ -351,18 +397,20 @@ impl Fractal {
             }
         }
 
+        // rendering stuff
         if self.size != rect.size() {
             self.size = rect.size();
             self.needs_update = true;
         }
-
         self.render_to_texture();
-
         eframe::egui::widgets::Image::from_texture(eframe::egui::load::SizedTexture::new(
             self.texture_id(),
             eframe::egui::Vec2::new(1.0, 1.0), // arbitrary size
         ))
         .paint_at(ui, rect);
+
+        // open the settings ui if double clicked
+        r.double_clicked()
     }
 
     /// render the fractal to a wgpu texture and resets needs_update

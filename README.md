@@ -4,7 +4,8 @@
 
 ## controls
 
-- space to hide hud
+- space to hide all hud elements / windows
+- double click to open fractal settings / params
 
 ## fractals
 
