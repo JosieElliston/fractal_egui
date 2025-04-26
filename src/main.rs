@@ -16,7 +16,7 @@ fn main() -> eframe::Result {
     )
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct Complex {
     real: f32,
     imag: f32,
@@ -168,12 +168,32 @@ impl eframe::App for App {
 
                 let prev_point = self.point;
 
-                // TODO: remove name
+                // TODO: better name for the main fractal so swapping doesn't break the names
                 // TODO: clicking on the background should deselect/unfocus the windows
-                self.settings_main |= self.main.ui(ctx, ui);
+                {
+                    let FractalUiResponse {
+                        should_open_settings: open,
+                        new_point: point,
+                    } = self.main.ui(
+                        ctx,
+                        ui,
+                        match self.show_overlay {
+                            true => Some(self.point),
+                            false => None,
+                        },
+                    );
+                    self.settings_main |= open;
+                    if let Some(point) = point {
+                        self.point = point;
+                    }
+                }
                 if self.show_overlay {
                     if self.settings_main {
-                        self.settings_main = self.main.settings_ui(ctx, ui, "main");
+                        let SettingsUiResponse {
+                            is_settings_open,
+                            swap_main: _,
+                        } = self.main.settings_ui(ctx, ui, "main");
+                        self.settings_main = is_settings_open;
                     }
                     assert_eq!(self.fractal_windows.len(), self.settings_windows.len());
                     let mut i = 0;
@@ -191,10 +211,28 @@ impl eframe::App for App {
                             .default_size([250.0, 250.0])
                             .open(&mut fractal_open)
                             .show(ctx, |ui| {
-                                self.settings_windows[i] |= fractal.ui(ctx, ui);
+                                let FractalUiResponse {
+                                    should_open_settings,
+                                    new_point,
+                                } = fractal.ui(ctx, ui, Some(self.point));
+                                self.settings_windows[i] |= should_open_settings;
+                                if let Some(point) = new_point {
+                                    self.point = point;
+                                }
                             });
                         if self.settings_windows[i] {
-                            self.settings_windows[i] = fractal.settings_ui(ctx, ui, name);
+                            let SettingsUiResponse {
+                                is_settings_open,
+                                swap_main,
+                            } = fractal.settings_ui(ctx, ui, name);
+                            self.settings_windows[i] = is_settings_open;
+                            if swap_main {
+                                std::mem::swap(&mut self.main, &mut self.fractal_windows[i].0);
+                                std::mem::swap(
+                                    &mut self.settings_main,
+                                    &mut self.settings_windows[i],
+                                );
+                            }
                         }
                         if !fractal_open {
                             self.fractal_windows.swap_remove(i);
@@ -204,18 +242,30 @@ impl eframe::App for App {
                         }
                     }
 
-                    // area is allow the frame to be drawn on top of the fractal
+                    // area is to allow the frame to be drawn on top of the fractal
                     egui::Area::new(egui::Id::new("area"))
                         .constrain_to(ctx.screen_rect())
                         .anchor(egui::Align2::LEFT_TOP, egui::Vec2::ZERO)
                         .show(ui.ctx(), |ui| {
-                            // ui.set_width(egui_rect.width());
-                            // ui.label(format!("Solved: {}", view.sim.lock().is_solved()));
                             egui::Frame::popup(ui.style())
                                 .outer_margin(5.0)
                                 .shadow(egui::Shadow::NONE)
                                 .show(ui, |ui| {
                                     egui::CollapsingHeader::new("global").show(ui, |ui| {
+                                        // println!(
+                                        //     "center: {} + {}i, real_radius: {}",
+                                        //     self.main.camera().center.real,
+                                        //     self.main.camera().center.imag,
+                                        //     self.main.camera().radius_real,
+                                        // );
+                                        // TODO: clicking copies the camera?
+                                        ui.label(format!(
+                                            "center: {} + {}i\nreal_radius: {}",
+                                            self.main.camera().center.real,
+                                            self.main.camera().center.imag,
+                                            self.main.camera().radius_real,
+                                        ));
+
                                         ui.add(
                                             egui::Slider::new(&mut self.point.real, -2.0..=2.0)
                                                 .text("point real"),
@@ -241,6 +291,14 @@ impl eframe::App for App {
                                     });
                                 });
                         });
+                }
+
+                // TODO: point may not the the correct abstraction
+                if self.point != prev_point {
+                    self.main.set_point(self.point);
+                    for (fractal, _) in &mut self.fractal_windows {
+                        fractal.set_point(self.point);
+                    }
                 }
             });
     }
