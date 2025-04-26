@@ -128,6 +128,7 @@ struct App {
     fractal_windows: Vec<Fractal>,
     settings_windows: Vec<bool>,
     point: Complex,
+    show_point: bool,
     show_overlay: bool,
     // /// whether to have nice trackpad panning and zooming at the cost of disabling the mouse
     // trackpad: bool,
@@ -144,6 +145,7 @@ impl App {
             fractal_windows: vec![],
             settings_windows: vec![],
             point: Complex::ZERO,
+            show_point: false,
             show_overlay: true,
             // trackpad: false,
             render_state,
@@ -167,25 +169,27 @@ impl eframe::App for App {
                     self.show_overlay = !self.show_overlay;
                 }
 
-                // TODO: possibly fractals should know whether they're main and settings_open
-                // TODO: better name for the main fractal so swapping doesn't break the names
+                // TODO: possibly fractals should know whether they're main
+                // TODO: possibly fractals should know whether their settings are open
+                // TODO: possibly fractals should know whether they should show the point
                 // TODO: clicking on the background should deselect/unfocus the windows
                 {
                     let FractalUiResponse {
-                        should_open_settings: open,
-                        new_point: point,
+                        should_open_settings,
+                        // new_point,
                     } = self.main.ui(
                         ctx,
                         ui,
-                        match self.show_overlay {
-                            true => Some(self.point),
-                            false => None,
+                        if self.show_point && self.show_overlay {
+                            Some(self.point)
+                        } else {
+                            None
                         },
                     );
-                    self.settings_main |= open;
-                    if let Some(point) = point {
-                        self.point = point;
-                    }
+                    self.settings_main |= should_open_settings;
+                    // if let Some(point) = new_point {
+                    //     self.point = point;
+                    // }
                 }
                 if self.show_overlay {
                     if self.settings_main {
@@ -213,12 +217,20 @@ impl eframe::App for App {
                             .show(ctx, |ui| {
                                 let FractalUiResponse {
                                     should_open_settings,
-                                    new_point,
-                                } = fractal.ui(ctx, ui, Some(self.point));
+                                    // new_point,
+                                } = fractal.ui(
+                                    ctx,
+                                    ui,
+                                    if self.show_point && self.show_overlay {
+                                        Some(self.point)
+                                    } else {
+                                        None
+                                    },
+                                );
                                 self.settings_windows[i] |= should_open_settings;
-                                if let Some(point) = new_point {
-                                    self.point = point;
-                                }
+                                // if let Some(point) = new_point {
+                                //     self.point = point;
+                                // }
                             });
                         if self.settings_windows[i] {
                             let SettingsUiResponse {
@@ -252,48 +264,71 @@ impl eframe::App for App {
                                 .shadow(egui::Shadow::NONE)
                                 .show(ui, |ui| {
                                     egui::CollapsingHeader::new("global").show(ui, |ui| {
-                                        let average_dt = self.dts.average().expect("we added one this frame so dts must be non-empty");
-                                        ui.label(format!("    dt: {:08.05}\n1/dt: {:08.05}", average_dt, 1.0 / average_dt,));
-                                        // println!(
-                                        //     "center: {} + {}i, real_radius: {}",
-                                        //     self.main.camera().center.real,
-                                        //     self.main.camera().center.imag,
-                                        //     self.main.camera().radius_real,
-                                        // );
-                                        // TODO: clicking copies the camera?
-                                        ui.label(format!(
+                                        // frame rate
+                                        {
+                                            let average_dt = self.dts.average().expect(
+                                                "we added one this frame so dts must be non-empty",
+                                            );
+                                            ui.label(format!(
+                                                "    dt: {:08.05}\n1/dt: {:08.05}",
+                                                average_dt,
+                                                1.0 / average_dt,
+                                            ));
+                                        }
+
+                                        // view stuff
+                                        {
+                                            // println!(
+                                            //     "center: {} + {}i, real_radius: {}",
+                                            //     self.main.camera().center.real,
+                                            //     self.main.camera().center.imag,
+                                            //     self.main.camera().radius_real,
+                                            // );
+                                            // TODO: clicking copies the camera?
+                                            ui.label(format!(
                                             "center: {:12.09} + {:12.09}i\nreal_radius: {:12.09}",
                                             self.main.camera().center.real,
                                             self.main.camera().center.imag,
                                             self.main.camera().radius_real,
                                         ));
-
-                                        ui.add(
-                                            egui::Slider::new(&mut self.point.real, -2.0..=2.0)
-                                                .text("point real"),
-                                        );
-                                        ui.add(
-                                            egui::Slider::new(&mut self.point.imag, -2.0..=2.0)
-                                                .text("point imag"),
-                                        );
-
-                                        if ui.button("add mandelbrot").clicked() {
-                                            self.fractal_windows.push(Fractal::default(
-                                                &self.render_state,
-                                                self.fractal_counter,
-                                                FractalType::new_mandelbrot(Complex::ZERO),
-                                            ));
-                                            self.settings_windows.push(false);
-                                            self.fractal_counter += 1;
                                         }
-                                        if ui.button("add julia set").clicked() {
-                                            self.fractal_windows.push(Fractal::default(
-                                                &self.render_state,
-                                                self.fractal_counter,
-                                                FractalType::new_julia(Complex::ZERO),
+
+                                        // point stuff
+                                        {
+                                            ui.add(egui::Checkbox::new(
+                                                &mut self.show_point,
+                                                "show point",
                                             ));
-                                            self.settings_windows.push(false);
-                                            self.fractal_counter += 1;
+                                            ui.add(
+                                                egui::Slider::new(&mut self.point.real, -2.0..=2.0)
+                                                    .text("point real"),
+                                            );
+                                            ui.add(
+                                                egui::Slider::new(&mut self.point.imag, -2.0..=2.0)
+                                                    .text("point imag"),
+                                            );
+                                        }
+
+                                        // add fractal windows
+                                        {
+                                            if ui.button("add mandelbrot").clicked() {
+                                                self.fractal_windows.push(Fractal::default(
+                                                    &self.render_state,
+                                                    self.fractal_counter,
+                                                    FractalType::new_mandelbrot(Complex::ZERO),
+                                                ));
+                                                self.settings_windows.push(false);
+                                                self.fractal_counter += 1;
+                                            }
+                                            if ui.button("add julia set").clicked() {
+                                                self.fractal_windows.push(Fractal::default(
+                                                    &self.render_state,
+                                                    self.fractal_counter,
+                                                    FractalType::new_julia(Complex::ZERO),
+                                                ));
+                                                self.settings_windows.push(false);
+                                                self.fractal_counter += 1;
+                                            }
                                         }
                                     });
                                 });

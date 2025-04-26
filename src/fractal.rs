@@ -126,7 +126,7 @@ impl Params {
 
 pub(crate) struct FractalUiResponse {
     pub(crate) should_open_settings: bool,
-    pub(crate) new_point: Option<Complex>,
+    // pub(crate) new_point: Option<Complex>,
 }
 
 pub(crate) struct SettingsUiResponse {
@@ -470,41 +470,42 @@ impl Fractal {
         ))
         .paint_at(ui, rect);
         if let Some(point) = point {
-            // TODO: this is probably wrong
             ui.painter_at(rect).circle_filled(
                 rect.center()
                     + eframe::egui::Vec2::new(
-                        point.real * rect.width() / self.size.x,
-                        point.imag * rect.height() / self.size.y,
+                        0.5 * (point.real - self.camera.center.real) / self.camera.radius_real
+                            * rect.width(),
+                        -0.5 * (point.imag - self.camera.center.imag) / self.camera.radius_real
+                            * rect.width(),
                     ),
                 5.0,
-                eframe::egui::Color32::from_black_alpha(200),
+                eframe::egui::Color32::RED,
             );
         }
 
-        // move the point
-        let point = if r.is_pointer_button_down_on()
-            && ctx.input(|i: &egui::InputState| i.pointer.secondary_down())
-        {
-            // TODO: this is probably wrong
-            // TODO: this control flow is very bad
-            r.hover_pos().map(|p| {
-                let x = p.x / rect.width() * self.size.x;
-                let y = p.y / rect.height() * self.size.y;
-                Complex {
-                    real: self.camera.center.real - self.camera.radius_real + x,
-                    imag: self.camera.center.imag
-                        - self.camera.radius_real * (self.size.y / self.size.x)
-                        + y,
-                }
-            })
-        } else {
-            None
-        };
+        // // move the point
+        // let point = if r.is_pointer_button_down_on()
+        //     && ctx.input(|i: &egui::InputState| i.pointer.secondary_down())
+        // {
+        //     // TODO: this is probably wrong
+        //     // TODO: this control flow is very bad
+        //     r.hover_pos().map(|p| {
+        //         let x = p.x / rect.width() * self.size.x;
+        //         let y = p.y / rect.height() * self.size.y;
+        //         Complex {
+        //             real: self.camera.center.real - self.camera.radius_real + x,
+        //             imag: self.camera.center.imag
+        //                 - self.camera.radius_real * (self.size.y / self.size.x)
+        //                 + y,
+        //         }
+        //     })
+        // } else {
+        //     None
+        // };
 
         FractalUiResponse {
             should_open_settings: r.double_clicked(),
-            new_point: point,
+            // new_point: point,
         }
     }
 
