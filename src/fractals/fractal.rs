@@ -16,11 +16,16 @@ pub(crate) enum FractalType {
     Mandelbrot { z0: Complex } = 0,
     Julia = 1,
 }
-impl Default for FractalType {
-    fn default() -> Self {
-        Self::Mandelbrot { z0: Complex::ZERO }
+impl FractalType {
+    pub(crate) fn new_mandelbrot(z0: Complex) -> Self {
+        Self::Mandelbrot { z0 }
     }
 }
+// impl Default for FractalType {
+//     fn default() -> Self {
+//         Self::Mandelbrot { z0: Complex::ZERO }
+//     }
+// }
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::NoUninit)]
@@ -106,9 +111,9 @@ pub(crate) struct Fractal {
     settings_open: bool,
 }
 impl Fractal {
-    pub(crate) fn default(cc: &eframe::CreationContext<'_>, ty: FractalType) -> Self {
+    pub(crate) fn default(render_state: &eframe::egui_wgpu::RenderState, ty: FractalType) -> Self {
         Self::new(
-            cc,
+            render_state,
             Camera::default(),
             // Camera {
             //     center: Complex::zero(),
@@ -124,7 +129,7 @@ impl Fractal {
     }
 
     pub(crate) fn new(
-        cc: &eframe::CreationContext<'_>,
+        render_state: &eframe::egui_wgpu::RenderState,
         camera: Camera,
         velocity: eframe::egui::Vec2,
         size: eframe::egui::Vec2,
@@ -132,7 +137,6 @@ impl Fractal {
         max_depth: u32,
         escape_radius: f32,
     ) -> Self {
-        let render_state = cc.wgpu_render_state.as_ref().unwrap();
         let device = render_state.device.clone();
         let queue = render_state.queue.clone();
         let renderer = render_state.renderer.clone();
@@ -315,26 +319,15 @@ impl Fractal {
     }
 
     /// returns whether the settings ui should still be open
-    pub(crate) fn settings_ui(&mut self, ctx: &egui::Context, ui: &mut eframe::egui::Ui, name: &str) -> bool {
-        // if ui.button("Settings").clicked() {
-        //     self.settings_open = !self.settings_open;
-        // }
-        // if self.settings_open {
-        //     egui::collapsing_header::CollapsingHeader::new("Settings")
-        //         .default_open(true)
-        //         .show(ui, |ui| {
-        //             ui.label("Max Depth");
-        //             ui.add(egui::Slider::u32(&mut self.max_depth, 1..=1000));
-        //             ui.label("Escape Radius");
-        //             ui.add(egui::Slider::f32(&mut self.escape_radius, 1.0..=100.0));
-        //         });
-        // }
-
+    pub(crate) fn settings_ui(
+        &mut self,
+        ctx: &egui::Context,
+        ui: &mut eframe::egui::Ui,
+        name: &str,
+    ) -> bool {
         let mut open = true;
         egui::Window::new(format!("{name} settings"))
             // .title_bar(false)
-            // .default_open(default_open)
-            // .default_size([250.0, 250.0])
             .open(&mut open)
             .show(ctx, |ui| {
                 ui.label("max depth");

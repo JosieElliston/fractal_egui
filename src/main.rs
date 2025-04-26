@@ -121,28 +121,33 @@ impl Default for Camera {
 // }
 
 struct App {
+    render_state: eframe::egui_wgpu::RenderState,
     main: Fractal,
     // windows: Vec<FractalWindow>,
     settings_main: bool,
     fractal_windows: Vec<(Fractal, String)>,
     settings_windows: Vec<bool>,
+    point: Complex,
     show_overlay: bool,
     /// whether to have nice trackpad panning and zooming at the cost of disabling the mouse
     trackpad: bool,
 }
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let render_state = cc.wgpu_render_state.clone().unwrap();
         Self {
-            main: Fractal::default(cc, FractalType::default()),
+            main: Fractal::default(&render_state, FractalType::new_mandelbrot(Complex::ZERO)),
             settings_main: false,
-            // fractal_windows: vec![],
-            fractal_windows: vec![(
-                Fractal::default(cc, FractalType::default()),
-                "test".to_string(),
-            )],
-            settings_windows: vec![false],
+            fractal_windows: vec![],
+            // fractal_windows: vec![(
+            //     Fractal::default(&render_state, FractalType::new_mandelbrot(Complex::ZERO)),
+            //     "test".to_string(),
+            // )],
+            settings_windows: vec![],
+            point: Complex::ZERO,
             show_overlay: true,
             trackpad: false,
+            render_state,
         }
     }
 }
@@ -161,6 +166,8 @@ impl eframe::App for App {
                     self.show_overlay = !self.show_overlay;
                 }
 
+                let prev_point = self.point;
+
                 // TODO: remove name
                 // TODO: clicking on the background should deselect/unfocus the windows
                 self.settings_main |= self.main.ui(ctx, ui);
@@ -176,8 +183,9 @@ impl eframe::App for App {
                         // TODO: make it not have a shadow
                         let (fractal, name) = &mut self.fractal_windows[i];
                         let mut fractal_open = true;
-                        egui::Window::new("fractal")
+                        egui::Window::new(&*name)
                             .resizable(true)
+                            // .shadow(egui::Shadow::NONE)
                             // .title_bar(false)
                             // .default_open(default_open)
                             .default_size([250.0, 250.0])
@@ -186,7 +194,7 @@ impl eframe::App for App {
                                 self.settings_windows[i] |= fractal.ui(ctx, ui);
                             });
                         if self.settings_windows[i] {
-                            self.settings_windows[i] = fractal.settings_ui(ctx, ui, &name);
+                            self.settings_windows[i] = fractal.settings_ui(ctx, ui, name);
                         }
                         if !fractal_open {
                             self.fractal_windows.swap_remove(i);
@@ -196,14 +204,43 @@ impl eframe::App for App {
                         }
                     }
 
-                    // settings ui
-                    // egui::Frame::popup(ui.style())
-                    //     // .outer_margin(10.0)
-                    //     // .shadow(egui::Shadow::NONE)
-                    //     // .stroke(egui::Stroke::NONE)
-                    //     .show(ui, |ui| {
-                    //         egui::CollapsingHeader::new("settings").show(ui, |ui| {});
-                    //     });
+                    // area is allow the frame to be drawn on top of the fractal
+                    egui::Area::new(egui::Id::new("area"))
+                        .constrain_to(ctx.screen_rect())
+                        .anchor(egui::Align2::LEFT_TOP, egui::Vec2::ZERO)
+                        .show(ui.ctx(), |ui| {
+                            // ui.set_width(egui_rect.width());
+                            // ui.label(format!("Solved: {}", view.sim.lock().is_solved()));
+                            egui::Frame::popup(ui.style())
+                                .outer_margin(5.0)
+                                .shadow(egui::Shadow::NONE)
+                                .show(ui, |ui| {
+                                    egui::CollapsingHeader::new("global").show(ui, |ui| {
+                                        ui.add(
+                                            egui::Slider::new(&mut self.point.real, -2.0..=2.0)
+                                                .text("point real"),
+                                        );
+                                        ui.add(
+                                            egui::Slider::new(&mut self.point.imag, -2.0..=2.0)
+                                                .text("point imag"),
+                                        );
+
+                                        if ui.button("add mandelbrot").clicked() {
+                                            self.fractal_windows.push((
+                                                Fractal::default(
+                                                    &self.render_state,
+                                                    FractalType::new_mandelbrot(Complex::ZERO),
+                                                ),
+                                                format!(
+                                                    "mandelbrot {}",
+                                                    self.fractal_windows.len()
+                                                ),
+                                            ));
+                                            self.settings_windows.push(false);
+                                        }
+                                    });
+                                });
+                        });
                 }
             });
     }
