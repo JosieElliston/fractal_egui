@@ -92,12 +92,16 @@ fn vertex_main(@builtin(vertex_index) i: u32) -> VertexOutput {
 
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    if params.fractal_type == FRACTAL_MANDELBROT {
+    let real: f32 = params.center_real + input.fragment_position.x * params.radius_real;
+    let imag: f32 = params.center_imag + input.fragment_position.y * params.radius_imag;
+    if false {
+        return vec4<f32>(fract(real), fract(imag), 0.0, 1.0);
+    } else if params.fractal_type == FRACTAL_MANDELBROT {
         let depth = get_depth(
             params.point_real,
             params.point_imag,
-            params.center_real + input.fragment_position.x * params.radius_real,
-            params.center_imag + input.fragment_position.y * params.radius_imag
+            real,
+            imag,
         );
         var color: f32;
         if depth == f32(params.max_depth) {
@@ -114,6 +118,12 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
             // let t = log(f32(depth));
             let t = fract(log(f32(depth)));
             // let t = fract(log(log(f32(depth))));
+
+            // if t < 0.95 {
+            //     color = 0.0;
+            // } else {
+            //     color = 1.0;
+            // }
 
             // basic turbo
             // return turbo(t, 0.0, 1.0);

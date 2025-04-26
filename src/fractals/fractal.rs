@@ -75,8 +75,9 @@ pub(crate) struct Fractal {
     // velocity: Camera,
     // TODO: make this in natural units
     velocity: eframe::egui::Vec2,
-    width: u32,
-    height: u32,
+    // width: u32,
+    // height: u32,
+    size: eframe::egui::Vec2,
 
     // // this is so that we can manually do subsampling,
     // // which allows for reverse subsampling to render at a lower resolution
@@ -102,6 +103,7 @@ pub(crate) struct Fractal {
     ty: FractalType,
     max_depth: u32,
     escape_radius: f32,
+    settings_open: bool,
 }
 impl Fractal {
     pub(crate) fn default(cc: &eframe::CreationContext<'_>, ty: FractalType) -> Self {
@@ -114,8 +116,7 @@ impl Fractal {
             // },
             eframe::egui::Vec2::ZERO,
             // these needs to be nonzero to make a texture
-            100,
-            100,
+            egui::Vec2::new(1.0, 1.0),
             ty,
             1024,
             10.0,
@@ -126,8 +127,7 @@ impl Fractal {
         cc: &eframe::CreationContext<'_>,
         camera: Camera,
         velocity: eframe::egui::Vec2,
-        width: u32,
-        height: u32,
+        size: eframe::egui::Vec2,
         ty: FractalType,
         max_depth: u32,
         escape_radius: f32,
@@ -152,8 +152,8 @@ impl Fractal {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("texture"),
             size: wgpu::Extent3d {
-                width,
-                height,
+                width: size.x as u32,
+                height: size.y as u32,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -257,8 +257,7 @@ impl Fractal {
         Self {
             camera,
             velocity,
-            width,
-            height,
+            size,
             texture_id,
             needs_update: true,
             device,
@@ -271,37 +270,12 @@ impl Fractal {
             ty,
             max_depth,
             escape_radius,
+            settings_open: false,
         }
-    }
-
-    fn needs_update(&self) -> bool {
-        self.needs_update
     }
 
     fn texture_id(&self) -> eframe::egui::TextureId {
         self.texture_id
-    }
-
-    fn width(&self) -> u32 {
-        self.width
-    }
-
-    fn height(&self) -> u32 {
-        self.height
-    }
-
-    fn set_width(&mut self, width: u32) {
-        if self.width != width {
-            self.width = width;
-            self.needs_update = true;
-        }
-    }
-
-    fn set_height(&mut self, height: u32) {
-        if self.height != height {
-            self.height = height;
-            self.needs_update = true;
-        }
     }
 
     pub(crate) fn pan(&mut self, pan: eframe::egui::Vec2) {
@@ -311,9 +285,8 @@ impl Fractal {
         if pan.x == 0.0 && pan.y == 0.0 {
             return;
         }
-        self.camera.center.real -= 2.0 * pan.x / self.width as f32 * self.camera.radius_real;
-        self.camera.center.imag += 2.0 * pan.y / self.height as f32
-            * (self.camera.radius_real * self.height as f32 / self.width as f32);
+        self.camera.center.real -= 2.0 * pan.x / self.size.x * self.camera.radius_real;
+        self.camera.center.imag += 2.0 * pan.y * (self.camera.radius_real / self.size.x);
         self.needs_update = true;
     }
 
@@ -342,15 +315,15 @@ impl Fractal {
     }
 
     /// fills the entire ui rect with the image
-    pub(crate) fn render_to_ui(&mut self, ctx: &egui::Context, ui: &eframe::egui::Ui, name: &str) {
+    pub(crate) fn render_to_ui(
+        &mut self,
+        ctx: &egui::Context,
+        ui: &mut eframe::egui::Ui,
+    ) {
         let dt = ctx.input(|input_state| input_state.stable_dt);
-        // TODO: allow dragging windows by their title bar
-        let r = ui.interact(
-            ui.available_rect_before_wrap(),
-            // ui.available_rect_before_wrap() - ui.min_rect(),
-            eframe::egui::Id::new(name),
-            egui::Sense::click_and_drag(),
-        );
+        let rect = ui.available_rect_before_wrap();
+
+        let r = ui.allocate_rect(rect, egui::Sense::click_and_drag());
         // if self.trackpad {
         //     self.pan(ctx.input(|i| i.smooth_scroll_delta));
         // } else
@@ -361,10 +334,11 @@ impl Fractal {
             self.autopan(dt);
         }
 
-        if ui.rect_contains_pointer(ui.available_rect_before_wrap()) {
+        // if r.hover_pos()
+        if r.contains_pointer() {
             if let Some(mouse_pos) = ctx.input(|i| i.pointer.latest_pos()) {
                 self.zoom(
-                    mouse_pos - ui.available_rect_before_wrap().center(),
+                    mouse_pos - rect.center(),
                     ctx.input(|i| {
                         // if self.trackpad {
                         //     i.zoom_delta()
@@ -377,20 +351,18 @@ impl Fractal {
             }
         }
 
-        if self.width() != ui.available_width() as _ {
-            self.set_width(ui.available_width() as _);
-        }
-        if self.height() != ui.available_height() as _ {
-            self.set_height(ui.available_height() as _);
+        if self.size != rect.size() {
+            self.size = rect.size();
+            self.needs_update = true;
         }
 
         self.render_to_texture();
 
         eframe::egui::widgets::Image::from_texture(eframe::egui::load::SizedTexture::new(
             self.texture_id(),
-            eframe::egui::Vec2::new(10.0, 10.0), // arbitrary size
+            eframe::egui::Vec2::new(1.0, 1.0), // arbitrary size
         ))
-        .paint_at(ui, ui.available_rect_before_wrap());
+        .paint_at(ui, rect);
     }
 
     /// render the fractal to a wgpu texture and resets needs_update
@@ -411,8 +383,8 @@ impl Fractal {
             0,
             bytemuck::bytes_of(&Params::new(
                 self.camera,
-                self.width,
-                self.height,
+                self.size.x as u32,
+                self.size.y as u32,
                 self.ty,
                 self.max_depth,
                 self.escape_radius,
@@ -423,19 +395,15 @@ impl Fractal {
         command_encoder.push_debug_group("render_pass");
         {
             let new_size = wgpu::Extent3d {
-                width: self.width,
-                height: self.height,
+                width: self.size.x as u32,
+                height: self.size.y as u32,
                 depth_or_array_layers: 1,
             };
             if self.texture.size() != new_size {
                 // println!("self.texture.size() != new_size");
                 self.texture = self.device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("texture"),
-                    size: wgpu::Extent3d {
-                        width: self.width,
-                        height: self.height,
-                        depth_or_array_layers: 1,
-                    },
+                    size: new_size,
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,

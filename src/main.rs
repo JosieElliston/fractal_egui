@@ -155,7 +155,8 @@ impl eframe::App for App {
                     self.show_overlay = !self.show_overlay;
                 }
 
-                self.main.render_to_ui(ctx, ui, "main");
+                // TODO: remove name
+                self.main.render_to_ui(ctx, ui);
                 if self.show_overlay {
                     self.fractal_windows.retain_mut(|(fractal, name)| {
                         // TODO: better title name
@@ -194,8 +195,8 @@ impl eframe::App for App {
                                 //     })
                                 //     .response;
 
-                                fractal.render_to_ui(ctx, ui, name);
-                                ui.allocate_space(ui.available_size());
+                                fractal.render_to_ui(ctx, ui);
+                                // ui.allocate_space(ui.available_size());
                             });
                         open
                     });
