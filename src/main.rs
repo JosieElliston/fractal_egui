@@ -139,8 +139,8 @@ impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let render_state = cc.wgpu_render_state.clone().unwrap();
         Self {
-            main: Fractal::default(&render_state, 0, FractalType::new_mandelbrot(Complex::ZERO)),
-            // main: Fractal::default(&render_state, 0, FractalType::new_julia(Complex::ZERO)),
+            // main: Fractal::default(&render_state, 0, FractalType::new_mandelbrot(Complex::ZERO)),
+            main: Fractal::default(&render_state, 0, FractalType::new_metabrot(8)),
             settings_main: false,
             fractal_windows: vec![],
             settings_windows: vec![],
@@ -316,6 +316,15 @@ impl eframe::App for App {
                                                     &self.render_state,
                                                     self.fractal_counter,
                                                     FractalType::new_mandelbrot(Complex::ZERO),
+                                                ));
+                                                self.settings_windows.push(false);
+                                                self.fractal_counter += 1;
+                                            }
+                                            if ui.button("add metabrot").clicked() {
+                                                self.fractal_windows.push(Fractal::default(
+                                                    &self.render_state,
+                                                    self.fractal_counter,
+                                                    FractalType::new_metabrot(8),
                                                 ));
                                                 self.settings_windows.push(false);
                                                 self.fractal_counter += 1;

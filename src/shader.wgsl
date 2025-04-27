@@ -98,6 +98,44 @@ fn vertex_main(@builtin(vertex_index) i: u32) -> VertexOutput {
 	return VertexOutput(vec4<f32>(position, 0.0, 1.0), position);
 }
 
+fn color_of_depth(depth: f32) -> vec4<f32> {
+    var color: f32;
+    if depth == f32(params.max_depth) {
+        color = 0.0;
+    } else if depth == f32(CYCLE_DEPTH) {
+        color = 0.0;
+    } else if depth == 0 {
+        color = 1.0;
+    } else {
+        // color = clamp(0.1 * log(f32(depth)), 0.0, 1.0);
+        // color = clamp(0.1 * fract(log(f32(depth))), 0.0, 1.0);
+        
+        // do this so it's cyclic
+        // let t = log(f32(depth));
+        let t = fract(log(f32(depth)));
+        // let t = fract(log(log(f32(depth))));
+
+        // if t < 0.95 {
+        //     color = 0.0;
+        // } else {
+        //     color = 1.0;
+        // }
+
+        // basic turbo
+        // return turbo(t, 0.0, 1.0);
+
+        // cyclic turbo
+        // if (t < 0.5) {
+        //     return turbo(t, 0.0, 0.5);
+        // } else {
+        //     return turbo(t, 1.0, 0.5);
+        // }
+
+        // rainbow
+        return rainbow(t);
+    }
+    return vec4<f32>(color, color, color, 1.0);
+}
 
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
@@ -123,43 +161,76 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 params.point_imag,
             );
         }
-        
-        var color: f32;
-        if depth == f32(params.max_depth) {
-            color = 0.0;
-        } else if depth == f32(CYCLE_DEPTH) {
-            color = 0.0;
-        } else if depth == 0 {
-            color = 1.0;
-        } else {
-            // color = clamp(0.1 * log(f32(depth)), 0.0, 1.0);
-            // color = clamp(0.1 * fract(log(f32(depth))), 0.0, 1.0);
-            
-            // do this so it's cyclic
-            // let t = log(f32(depth));
-            let t = fract(log(f32(depth)));
-            // let t = fract(log(log(f32(depth))));
-
-            // if t < 0.95 {
-            //     color = 0.0;
-            // } else {
-            //     color = 1.0;
-            // }
-
-            // basic turbo
-            // return turbo(t, 0.0, 1.0);
-
-            // cyclic turbo
-            // if (t < 0.5) {
-            //     return turbo(t, 0.0, 0.5);
-            // } else {
-            //     return turbo(t, 1.0, 0.5);
-            // }
-
-            // rainbow
-            return rainbow(t);
+        return color_of_depth(depth);
+    } else if params.fractal_type == FRACTAL_METABROT || params.fractal_type == FRACTAL_METAJULIA {
+        var best_depth: f32 = 0.0;
+        var best_real: f32 = 0.0;
+        var best_imag: f32 = 0.0;
+        for (var row: u32 = 0; row < params.sub_fractal_width; row++) {
+            for (var col: u32 = 0; col < params.sub_fractal_width; col++) {
+                // TODO: this may only be correct for the metabrot
+                let sub_real = (4.0 * f32(row) / f32(params.sub_fractal_width) - 2.0) + (imag * imag - real * real);
+                let sub_imag = (4.0 * f32(col) / f32(params.sub_fractal_width) - 2.0) + (2.0 * real * imag);
+                var depth: f32;
+                if params.fractal_type == FRACTAL_METABROT {
+                    depth = get_depth(
+                        real,
+                        imag,
+                        sub_real,
+                        sub_imag,
+                    );
+                } else {
+                    depth = get_depth(
+                        sub_real,
+                        sub_imag,
+                        real,
+                        imag,
+                    );
+                }
+                if depth >= f32(params.max_depth) {
+                    return color_of_depth(depth);
+                }
+                if depth > best_depth {
+                    best_depth = depth;
+                    best_real = sub_real;
+                    best_imag = sub_imag;
+                }
+            }
         }
-        return vec4<f32>(color, color, color, 1.0);
+        // re search the best pixel
+        for (var row: u32 = 0; row < params.sub_fractal_width; row++) {
+            for (var col: u32 = 0; col < params.sub_fractal_width; col++) {
+                // TODO: this may only be correct for the metabrot
+                // let radius: f32 = 10.0;
+                // TODO: using escape_radius_2 is extremely cursed
+                let radius = sqrt(params.escape_radius_2);
+                let sub_real = best_real + (2.0 * radius * f32(row) / f32(params.sub_fractal_width) - radius) / f32(params.sub_fractal_width);
+                let sub_imag = best_imag + (2.0 * radius * f32(col) / f32(params.sub_fractal_width) - radius) / f32(params.sub_fractal_width);
+                var depth: f32;
+                if params.fractal_type == FRACTAL_METABROT {
+                    depth = get_depth(
+                        real,
+                        imag,
+                        sub_real,
+                        sub_imag,
+                    );
+                } else {
+                    depth = get_depth(
+                        sub_real,
+                        sub_imag,
+                        real,
+                        imag,
+                    );
+                }
+                if depth >= f32(params.max_depth) {
+                    return color_of_depth(depth);
+                }
+                if depth > best_depth {
+                    best_depth = depth;
+                }
+            }
+        }
+        return color_of_depth(best_depth);
     } else {
         return vec4<f32>(1.0, 0.0, 0.0, 1.0);
     }

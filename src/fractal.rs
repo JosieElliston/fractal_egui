@@ -544,7 +544,7 @@ impl Fractal {
                     self.escape_radius = escape_radius;
                     self.needs_update = true;
                 }
-
+                // TODO: checkbox for whether we should match z0 to the point
                 match &mut self.ty {
                     FractalType::Mandelbrot { z0 } => {
                         let mut new_z0 = *z0;
@@ -563,7 +563,18 @@ impl Fractal {
                             self.needs_update = true;
                         }
                     }
-                    FractalType::Metabrot { .. } => (),
+                    FractalType::Metabrot { sub_fractal_width } => {
+                        let mut new_sub_fractal_width = *sub_fractal_width;
+                        ui.add(
+                            egui::Slider::new(&mut new_sub_fractal_width, 1..=64)
+                                .text("sub fractal width")
+                                .clamping(egui::SliderClamping::Never),
+                        );
+                        if new_sub_fractal_width != *sub_fractal_width {
+                            *sub_fractal_width = new_sub_fractal_width;
+                            self.needs_update = true;
+                        }
+                    }
                     FractalType::JuliaSet { c } => {
                         let mut new_c = *c;
                         ui.add(
